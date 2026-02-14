@@ -87,8 +87,13 @@ void Render::drawFrame() {
     vk::PresentInfoKHR presentInfo(*m_renderFinishedSemaphore, *m_swapchain, imageIndex);
     
     try {
-        (void)m_graphicsQueue.presentKHR(presentInfo);
-    } catch (...) {}
+        vk::Result result = m_graphicsQueue.presentKHR(presentInfo);
+        if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
+            // For now, just ignore it so the app doesn't crash
+        }
+    } catch (const vk::OutOfDateKHRError&) {
+        // If the window is resized, we'll implement recreation next
+    }
 
     m_graphicsQueue.waitIdle();
 }

@@ -1,4 +1,4 @@
-#define VK_USE_PLATFORM_WAYLAND_KHR
+//#define VK_USE_PLATFORM_WAYLAND_KHR
 #include "Zeta/window.hpp"
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
@@ -83,7 +83,9 @@ Window::~Window() {
 
 void Window::pollEvents() {
     if (m_display) {
-        wl_display_dispatch_pending(m_display);
+        wl_display_prepare_read(m_display);
+        wl_display_read_events(m_display);
+        wl_display_dispatch(m_display); 
         wl_display_flush(m_display);
     }
 }
@@ -98,12 +100,12 @@ void Window::global_registry_handler(void *data, struct wl_registry *registry,
     else if (std::strcmp(interface, "xdg_wm_base") == 0) {
         self->m_xdg_wm_base = (xdg_wm_base*)wl_registry_bind(registry, id, &xdg_wm_base_interface, 1);
         
-        static const struct xdg_wm_base_listener wm_base_listener = {
-            [](void*, struct xdg_wm_base* wm_base, uint32_t serial) {
-                xdg_wm_base_pong(wm_base, serial);
+        static const struct xdg_wm_base_listener shell_listener = {
+            .ping = [](void* data, struct xdg_wm_base* shell, uint32_t serial) {
+                xdg_wm_base_pong(shell, serial); // This keeps the window "alive"
             }
         };
-        xdg_wm_base_add_listener(self->m_xdg_wm_base, &wm_base_listener, nullptr);
+        xdg_wm_base_add_listener(self->m_xdg_wm_base, &shell_listener, nullptr);
     }
     else if (std::strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
         self->m_decoration_manager = (zxdg_decoration_manager_v1*)wl_registry_bind(
