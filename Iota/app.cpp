@@ -12,7 +12,7 @@ void App::run() {
 
     while (m_running == true) {
 		m_fps.begin();
-		m_fps.end();
+		
 
 		win.pollEvents();
 
@@ -21,7 +21,7 @@ void App::run() {
 		if (win.shouldClose()) {
 			m_running = false;
 		}
-
+		m_fps.end();
 		static int counter = 0;
 		if (counter++ > 200) {
 			counter = 0;
