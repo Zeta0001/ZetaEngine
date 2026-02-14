@@ -1,6 +1,8 @@
+#define VK_USE_PLATFORM_WAYLAND_KHR
 #include "Zeta/window.hpp"
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
 #include <cstring>
 #include <stdexcept>
 #include <iostream>
@@ -54,6 +56,14 @@ Window::Window(int width, int height, const std::string& title) {
     };
     xdg_toplevel_add_listener(m_xdg_toplevel, &xdg_toplevel_listener, this);
 
+    if (m_decoration_manager) {
+        struct zxdg_toplevel_decoration_v1* decoration = 
+            zxdg_decoration_manager_v1_get_toplevel_decoration(m_decoration_manager, m_xdg_toplevel);
+        
+        // Request server-side decorations (the title bar)
+        zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+    }
+
     // Initial commit
     wl_surface_commit(m_surface);
 
@@ -94,6 +104,10 @@ void Window::global_registry_handler(void *data, struct wl_registry *registry,
             }
         };
         xdg_wm_base_add_listener(self->m_xdg_wm_base, &wm_base_listener, nullptr);
+    }
+    else if (std::strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
+        self->m_decoration_manager = (zxdg_decoration_manager_v1*)wl_registry_bind(
+            registry, id, &zxdg_decoration_manager_v1_interface, 1);
     }
 }
 

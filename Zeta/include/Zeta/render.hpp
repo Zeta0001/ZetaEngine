@@ -1,5 +1,5 @@
 #pragma once
-#define VK_USE_PLATFORM_WAYLAND_KHR
+//#define VK_USE_PLATFORM_WAYLAND_KHR
 #include <vulkan/vulkan_raii.hpp>
 #include "Zeta/window.hpp"
 #include <vector>
