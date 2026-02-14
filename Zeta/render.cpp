@@ -59,7 +59,7 @@ vk::raii::SwapchainKHR Render::setupSwapchain(uint32_t w, uint32_t h) {
     info.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
     info.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
     info.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
-    info.presentMode = vk::PresentModeKHR::eFifo;
+    info.presentMode = vk::PresentModeKHR::eImmediate;
 
     return vk::raii::SwapchainKHR(m_device, info);
 }

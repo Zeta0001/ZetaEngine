@@ -28,6 +28,7 @@ public:
     struct wl_surface* get_surface() const { return m_surface; }
 
     bool shouldClose() const { return m_shouldClose; }
+    bool resizePending() const {return resize_pending; }
     void pollEvents();
 
     // Registry Callbacks (Must be public for the listener struct in .cpp)
@@ -48,6 +49,9 @@ private:
     struct zxdg_decoration_manager_v1* m_decoration_manager = nullptr;
 
     bool m_shouldClose = false;
+    int width = 800;
+    int height = 600;
+    bool resize_pending = false;
 };
 
 } // namespace Zeta

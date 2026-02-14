@@ -6,6 +6,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <iostream>
+#include <poll.h>
 
 namespace Zeta {
 
@@ -82,11 +83,36 @@ Window::~Window() {
 }
 
 void Window::pollEvents() {
-    if (m_display) {
-        wl_display_prepare_read(m_display);
+    // if (m_display) {
+    //     wl_display_prepare_read(m_display);
+    //     wl_display_read_events(m_display);
+    //     wl_display_dispatch(m_display); 
+    //     wl_display_flush(m_display);
+    // }
+    while (wl_display_prepare_read(m_display) != 0) {
+        // If events are already in the internal queue, dispatch them immediately
+        wl_display_dispatch_pending(m_display);
+    }
+    wl_display_flush(m_display);
+
+    // 2. Setup the poll structure
+    struct pollfd pfd;
+    pfd.fd = wl_display_get_fd(m_display);
+    pfd.events = POLLIN;
+
+    // 3. Poll with a timeout of 0 (non-blocking)
+    int ret = poll(&pfd, 1, 0);
+
+    if (ret > 0) {
+        // Data is available on the socket
         wl_display_read_events(m_display);
-        wl_display_dispatch(m_display); 
-        wl_display_flush(m_display);
+        wl_display_dispatch_pending(m_display);
+    } else {
+        // No data, or an error occurred; cancel the intent to read
+        wl_display_cancel_read(m_display);
+        
+        // Even if no new data was read, dispatch any remaining internal events
+        wl_display_dispatch_pending(m_display);
     }
 }
 
