@@ -27,7 +27,11 @@ Window::Window(int width, int height, const std::string& title) {
         throw std::runtime_error("Essential Wayland globals not found");
 
     // Create the surface
-    m_surface = wl_compositor_create_surface(m_compositor);
+    m_surface = wl_compositor_create_surface(m_compositor); 
+
+    if (!m_surface) {
+        throw std::runtime_error("Failed to create Wayland surface");
+    }
 
     // Setup XDG Shell
     m_xdg_surface = xdg_wm_base_get_xdg_surface(m_xdg_wm_base, m_surface);
