@@ -60,7 +60,16 @@ vk::raii::PhysicalDevice Render::pickPhysicalDevice() {
 
 vk::raii::Device Render::createLogicalDevice() {
     float priority = 1.0f;
-    vk::DeviceQueueCreateInfo queueInfo({}, 0, 1, &priority);
+    auto queueFamilies = m_physicalDevice.getQueueFamilyProperties();
+    uint32_t graphicsFamily = 0;
+    for (uint32_t i = 0; i < queueFamilies.size(); i++) {
+        if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+            graphicsFamily = i;
+            break;
+        }
+    }
+
+vk::DeviceQueueCreateInfo queueInfo({}, graphicsFamily, 1, &priority);
 
     // 1. Define the required device extensions
     std::vector<const char*> deviceExtensions = {
