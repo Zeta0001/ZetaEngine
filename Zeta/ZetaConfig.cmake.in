@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find Wayland via PkgConfig
+find_dependency(PkgConfig)
+pkg_check_modules(wayland-client REQUIRED wayland-client)
+
+# Find Vulkan
+find_dependency(Vulkan)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ZetaTargets.cmake")
