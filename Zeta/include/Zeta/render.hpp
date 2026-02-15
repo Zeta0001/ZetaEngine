@@ -1,5 +1,5 @@
 #pragma once
-//#define VK_USE_PLATFORM_WAYLAND_KHR
+#define VK_USE_PLATFORM_WAYLAND_KHR
 #include <vulkan/vulkan_raii.hpp>
 #include "Zeta/window.hpp"
 #include <vector>
@@ -16,6 +16,7 @@ public:
     Render& operator=(const Render&) = delete;
 
     void drawFrame();
+    void recreate_swapchain(int width, int height);
 
 private:
     // INITIALIZATION ORDER IS MANDATORY FOR RAII

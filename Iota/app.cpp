@@ -14,11 +14,27 @@ void App::run() {
 		m_fps.begin();
 		
 
-		win.pollEvents();
+		win.poll_events();
 
-		renderer.drawFrame();
+		if (win.m_resize_pending) {
+			// Acknowledge the Wayland event
+			win.config();
+			
+			// RECREATE HERE: Match the Vulkan swapchain to the new Wayland size
+			renderer.recreate_swapchain(win.m_width, win.m_height);
+			
+			win.m_resize_pending = false;
+			continue; // Skip this frame to ensure everything is synced
+		}
 
-		if (win.shouldClose()) {
+		try {
+			renderer.drawFrame();
+		} catch (const vk::OutOfDateKHRError& e) {
+			// 3. Fallback: Catch Vulkan's internal resize detection
+			win.m_resize_pending = true; 
+		}
+
+		if (win.should_close()) {
 			m_running = false;
 		}
 		m_fps.end();

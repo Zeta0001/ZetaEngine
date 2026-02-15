@@ -11,7 +11,7 @@ Render::Render(const char* appName, const Window& window)
       m_physicalDevice(pickPhysicalDevice()),
       m_device(createLogicalDevice()),
       m_graphicsQueue(m_device.getQueue(0, 0)), // Use family 0 for simplicity
-      m_swapchain(setupSwapchain(800, 600)),
+      m_swapchain(setupSwapchain(2560, 1600)),
       m_commandPool(m_device, vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0)),
       m_commandBuffer(std::move(vk::raii::CommandBuffers(m_device, {*m_commandPool, vk::CommandBufferLevel::ePrimary, 1}).front())),
       m_imageAvailableSemaphore(m_device, vk::SemaphoreCreateInfo()),
@@ -62,6 +62,44 @@ vk::raii::SwapchainKHR Render::setupSwapchain(uint32_t w, uint32_t h) {
     info.presentMode = vk::PresentModeKHR::eImmediate;
 
     return vk::raii::SwapchainKHR(m_device, info);
+}
+
+void Render::recreate_swapchain(int width, int height) {
+    // 1. Wait for GPU to finish work
+    m_device.waitIdle();
+
+    // 2. Destroy dependent RAII objects (Framebuffers and ImageViews)
+    // Assuming these are std::vector<vk::raii::Framebuffer> etc.
+    //m_swapchain_framebuffers.clear();
+    //m_swapchain_image_views.clear();
+
+    // 3. Configure new swapchain
+    vk::Extent2D extent{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+
+    vk::SwapchainCreateInfoKHR createInfo{};
+    createInfo.surface = *m_surface; // Dereference raii::SurfaceKHR to get raw handle
+    createInfo.minImageCount = 3;
+    createInfo.imageFormat = vk::Format::eB8G8R8A8Unorm;
+    createInfo.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
+    createInfo.imageExtent = extent;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+    createInfo.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
+    createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+    createInfo.presentMode = vk::PresentModeKHR::eImmediate;
+    // Smoothness: Use Mailbox for 165Hz jitter
+    
+    // Pass raw handle of current RAII swapchain for smooth transition
+    createInfo.oldSwapchain = *m_swapchain; 
+
+    // 4. Create new RAII swapchain
+    // Move-assignment here destroys the old m_swapchain AFTER the new one is ready
+    m_swapchain = vk::raii::SwapchainKHR(m_device, createInfo);
+
+    std::cout << "resize swapchaaiaiaina" << std::endl;
+    // 5. Re-initialize your dependent resources
+    //create_image_views();
+    //create_framebuffers();
 }
 
 void Render::drawFrame() {

@@ -16,6 +16,36 @@ static const struct wl_registry_listener registry_listener = {
     Window::global_registry_remover
 };
 
+// 1. Define the functions FIRST
+    void Window::handle_xdg_surface_configure(void* data, struct xdg_surface* surface, uint32_t serial) {
+        auto* win = static_cast<Window*>(data);
+        win->m_pending_serial = serial;
+        win->m_resize_pending = true;
+    }
+
+    void Window::handle_toplevel_configure(void* data, struct xdg_toplevel* toplevel, int32_t w, int32_t h, struct ::wl_array* states) {
+        auto* win = static_cast<Window*>(data);
+        if (w > 0 && h > 0) {
+            win->m_width = w;
+            win->m_height = h;
+        }
+    }
+
+    // 2. Define the listener structs SECOND (now they can see the functions)
+    static const struct xdg_surface_listener surface_listener = { 
+        .configure = Window::handle_xdg_surface_configure 
+    };
+
+    static const struct xdg_toplevel_listener toplevel_listener = { 
+        .configure = Window::handle_toplevel_configure, 
+        .close = [](void* d, struct xdg_toplevel* t){ 
+            static_cast<Window*>(d)->m_should_close = true; 
+        } 
+    };
+void Window::config(){
+    xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
+};
+
 Window::Window(int width, int height, const std::string& title) {
     m_display = wl_display_connect(nullptr);
     if (!m_display) throw std::runtime_error("Failed to connect to Wayland display");
@@ -35,27 +65,27 @@ Window::Window(int width, int height, const std::string& title) {
 
     // Setup XDG Surface
     m_xdg_surface = xdg_wm_base_get_xdg_surface(m_xdg_wm_base, m_surface);
-    static const struct xdg_surface_listener xdg_surface_listener = {
-        [](void* data, struct xdg_surface* surface, uint32_t serial) {
-            xdg_surface_ack_configure(surface, serial);
-            auto* self = static_cast<Zeta::Window*>(data);
-            wl_surface_commit(self->get_surface());
-        }
-    };
-    xdg_surface_add_listener(m_xdg_surface, &xdg_surface_listener, this);
+    // static const struct xdg_surface_listener xdg_surface_listener = {
+    //     [](void* data, struct xdg_surface* surface, uint32_t serial) {
+    //         xdg_surface_ack_configure(surface, serial);
+    //         auto* self = static_cast<Zeta::Window*>(data);
+    //         wl_surface_commit(self->get_surface());
+    //     }
+    // };
+    xdg_surface_add_listener(m_xdg_surface, &surface_listener, this);
 
     // Setup Toplevel
     m_xdg_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
     xdg_toplevel_set_title(m_xdg_toplevel, title.c_str());
 
-    static const struct xdg_toplevel_listener xdg_toplevel_listener = {
-        [](void*, struct xdg_toplevel*, int32_t, int32_t, struct wl_array*){}, // configure
-        [](void* data, struct xdg_toplevel*){ // close
-            auto* self = static_cast<Zeta::Window*>(data);
-            self->m_shouldClose = true;
-        }
-    };
-    xdg_toplevel_add_listener(m_xdg_toplevel, &xdg_toplevel_listener, this);
+    // static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+    //     [](void* data, struct xdg_toplevel*, int32_t width, int32_t height, struct wl_array*){}, // configure
+    //     [](void* data, struct xdg_toplevel*){ // close
+    //         auto* self = static_cast<Zeta::Window*>(data);
+    //         self->m_should_close = true;
+    //     }
+    // };
+    xdg_toplevel_add_listener(m_xdg_toplevel, &toplevel_listener, this);
 
     if (m_decoration_manager) {
         struct zxdg_toplevel_decoration_v1* decoration = 
@@ -82,39 +112,28 @@ Window::~Window() {
     if (m_display) wl_display_disconnect(m_display);
 }
 
-void Window::pollEvents() {
-    // if (m_display) {
-    //     wl_display_prepare_read(m_display);
-    //     wl_display_read_events(m_display);
-    //     wl_display_dispatch(m_display); 
-    //     wl_display_flush(m_display);
-    // }
+void Window::poll_events() {
     while (wl_display_prepare_read(m_display) != 0) {
-        // If events are already in the internal queue, dispatch them immediately
         wl_display_dispatch_pending(m_display);
     }
     wl_display_flush(m_display);
 
-    // 2. Setup the poll structure
-    struct pollfd pfd;
-    pfd.fd = wl_display_get_fd(m_display);
-    pfd.events = POLLIN;
-
-    // 3. Poll with a timeout of 0 (non-blocking)
-    int ret = poll(&pfd, 1, 0);
-
-    if (ret > 0) {
-        // Data is available on the socket
+    struct pollfd pfd = { wl_display_get_fd(m_display), POLLIN, 0 };
+    if (poll(&pfd, 1, 0) > 0) {
         wl_display_read_events(m_display);
         wl_display_dispatch_pending(m_display);
     } else {
-        // No data, or an error occurred; cancel the intent to read
         wl_display_cancel_read(m_display);
-        
-        // Even if no new data was read, dispatch any remaining internal events
-        wl_display_dispatch_pending(m_display);
+    }
+
+    // Handle the Resize Handshake
+    if (m_resize_pending) {
+        xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
+        // Trigger Vulkan swapchain recreation here
+        m_resize_pending = false;
     }
 }
+
 
 void Window::global_registry_handler(void *data, struct wl_registry *registry, 
                                      uint32_t id, const char *interface, uint32_t version) {
