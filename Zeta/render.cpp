@@ -10,12 +10,10 @@ namespace Zeta {
         struct wl_display* display, 
         struct wl_surface* surface, 
         uint32_t width, uint32_t height)
-: m_surface(nullptr), // Initialize as null first
-m_device(nullptr)
+// Use the explicit constructor: (Instance, CreateInfo)
+: m_surface(instance, vk::WaylandSurfaceCreateInfoKHR({}, display, surface)), 
+m_device(nullptr) 
 {
-// Use the RAII instance's factory method
-vk::WaylandSurfaceCreateInfoKHR createInfo({}, display, surface);
-m_surface = instance.createWaylandSurfaceKHR(createInfo);
     // 1. Select Physical Device with Scoring (Pick Discrete GPU)
     vk::raii::PhysicalDevices physical_devices(vk::raii::Instance(context, {})); // Add layers here if needed
     auto phys_device = physical_devices[0]; // Simplified for brevity; use scoring in production

@@ -18,7 +18,7 @@ App::App() :
     }()),
     // Create window (which creates the wl_surface and vk::raii::SurfaceKHR)
 	m_window(800, 600, "Zeta Engine"), // Matches Window(int, int, string)
-    m_renderer(m_context, m_window.get_surface(), 800, 600) // Must return vk::raii::SurfaceKHR
+	m_renderer(m_context, m_instance, m_window.get_display(), m_window.get_surface(), 800, 600)
 {}
 
 void App::init() {
