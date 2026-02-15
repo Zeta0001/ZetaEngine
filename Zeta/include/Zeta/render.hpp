@@ -1,60 +1,42 @@
 #pragma once
-#define VK_USE_PLATFORM_WAYLAND_KHR
 #include <vulkan/vulkan_raii.hpp>
-#include "Zeta/window.hpp"
 #include <vector>
-#include <string>
 
 namespace Zeta {
+    class Renderer {
+    public:
+    Renderer(vk::raii::Context& context, 
+        vk::raii::Instance& instance, 
+        struct wl_display* display, 
+        struct wl_surface* surface, 
+        uint32_t width, uint32_t height);
+        void draw_frame();
+        void recreate_swapchain(uint32_t width, uint32_t height);
 
-class Render {
-public:
-    Render(const char* appName, const Window& window);
-    ~Render() = default;
+    private:
+        // Config
+        const int MAX_FRAMES_IN_FLIGHT = 2;
+        uint32_t m_current_frame = 0;
+        vk::raii::SurfaceKHR m_surface = nullptr; 
+        // Core RAII Handles
+        vk::raii::Device m_device = nullptr;
+        vk::raii::Queue m_graphics_queue = nullptr;
+        vk::raii::SwapchainKHR m_swapchain = nullptr;
+        
+        // Sync Objects
+        std::vector<vk::raii::Semaphore> m_image_available_semaphores;
+        std::vector<vk::raii::Semaphore> m_render_finished_semaphores;
+        std::vector<vk::raii::Fence> m_in_flight_fences;
 
-    Render(const Render&) = delete;
-    Render& operator=(const Render&) = delete;
+        // Command Pool and Buffers
+        vk::raii::CommandPool m_command_pool = nullptr;
+        std::vector<vk::raii::CommandBuffer> m_command_buffers;
 
-    void drawFrame();
-    void recreate_swapchain(int width, int height);
+        vk::raii::SurfaceKHR* m_surface;
 
-private:
-
-    // INITIALIZATION ORDER IS MANDATORY FOR RAII
-    vk::raii::Context m_context;
-    vk::raii::Instance m_instance;
-    vk::raii::SurfaceKHR m_surface;
-    vk::raii::PhysicalDevice m_physicalDevice;
-    vk::raii::Device m_device;
-    vk::raii::Queue m_graphicsQueue;
-    vk::raii::SwapchainKHR m_swapchain = nullptr;
-    vk::raii::CommandPool m_commandPool;
-
-    struct wl_display* m_wl_display;
-    struct wl_surface* m_wl_surface;
-
-    // Synchronisation per frame in flight
-    std::vector<vk::raii::Semaphore> m_imageAvailableSemaphores;
-    std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;
-    std::vector<vk::raii::Fence> m_inFlightFences;
-
-    // Swapchain and command resources
-
-    std::vector<vk::raii::CommandBuffer> m_commandBuffers;
-
-    std::vector<vk::Image> m_swapchainImages;
-
-    // Frames in Flight configuration
-    const int MAX_FRAMES_IN_FLIGHT = 2; // Standard for parallelism without high latency
-    size_t m_currentFrame = 0;
-
-    uint32_t m_graphicsQueueFamilyIndex; // Store this for pool creation
-
-    // Helper methods called in initializer list
-    vk::raii::Instance createInstance(const char* appName);
-    vk::raii::PhysicalDevice pickPhysicalDevice();
-    vk::raii::Device createLogicalDevice();
-    vk::raii::SwapchainKHR setupSwapchain(uint32_t w, uint32_t h);
-};
-
-} // namespace Zeta
+        // Internal Helpers
+        uint32_t m_queue_family_index;
+        void create_sync_objects();
+        void create_command_resources();
+    };
+}

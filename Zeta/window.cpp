@@ -96,6 +96,7 @@ Window::Window(int width, int height, const std::string& title) {
     }
 
     // Initial commit
+    wl_surface_set_buffer_scale(m_surface, 1); 
     wl_surface_commit(m_surface);
 
     // Roundtrip 2: Sync so handles are valid before Render class starts
@@ -113,27 +114,17 @@ Window::~Window() {
 }
 
 void Window::poll_events() {
-    while (wl_display_prepare_read(m_display) != 0) {
-        wl_display_dispatch_pending(m_display);
-    }
+    // Non-blocking drain of the Wayland socket
+    wl_display_dispatch_pending(m_display);
     wl_display_flush(m_display);
 
-    struct pollfd pfd = { wl_display_get_fd(m_display), POLLIN, 0 };
+    // Only if you have a specific need to read (like input), use poll()
+    struct pollfd pfd = { .fd = wl_display_get_fd(m_display), .events = POLLIN };
     if (poll(&pfd, 1, 0) > 0) {
-        wl_display_read_events(m_display);
-        wl_display_dispatch_pending(m_display);
-    } else {
-        wl_display_cancel_read(m_display);
-    }
-
-    // Handle the Resize Handshake
-    if (m_resize_pending) {
-        xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
-        // Trigger Vulkan swapchain recreation here
-        m_resize_pending = false;
+        // Only read if there is data, never block
+        wl_display_dispatch(m_display); 
     }
 }
-
 
 void Window::global_registry_handler(void *data, struct wl_registry *registry, 
                                      uint32_t id, const char *interface, uint32_t version) {
