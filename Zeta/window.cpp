@@ -162,4 +162,11 @@ void Window::set_fullscreen(bool fullscreen) {
     wl_surface_commit(m_surface);
 }
 
+void Window::acknowledge_resize() {
+    if (m_xdg_surface && m_pending_serial != 0) {
+        xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
+        m_pending_serial = 0; // Clear after use
+    }
+}
+
 } // namespace Zeta

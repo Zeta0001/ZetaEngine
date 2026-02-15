@@ -2,7 +2,6 @@
 
 #include <string>
 #include <cstdint>
-
 // Wayland C types forward declared in global namespace
 struct wl_display;
 struct wl_registry;
@@ -46,12 +45,7 @@ public:
     static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height, struct ::wl_array *states);
 
     void set_fullscreen(bool fullscreen);
-    void acknowledge_resize() {
-        if (m_xdg_surface && m_pending_serial != 0) {
-            xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
-            m_pending_serial = 0; // Clear after use
-        }
-    }
+    void acknowledge_resize();
     // Resize members
     uint32_t m_pending_serial = 0;
     bool m_resize_pending = false;

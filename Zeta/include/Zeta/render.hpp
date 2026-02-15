@@ -32,8 +32,6 @@ namespace Zeta {
         vk::raii::CommandPool m_command_pool = nullptr;
         std::vector<vk::raii::CommandBuffer> m_command_buffers;
 
-        vk::raii::SurfaceKHR* m_surface;
-
         // Internal Helpers
         uint32_t m_queue_family_index;
         void create_sync_objects();
