@@ -3,22 +3,8 @@
 #include <vulkan/vulkan_raii.hpp>
 
 App::App() : 
-    m_context(),
-    // Initialize Instance with Validation Layers if in Debug
-    m_instance(m_context, []() {
-        vk::InstanceCreateInfo info;
-        std::vector<const char*> layers = { "VK_LAYER_KHRONOS_validation" };
-		std::vector<const char*> extensions = { 
-			vk::KHRSurfaceExtensionName, 
-			vk::KHRWaylandSurfaceExtensionName // Use the C++ constant
-		};
-        info.setPEnabledLayerNames(layers);
-        info.setPEnabledExtensionNames(extensions);
-        return info;
-    }()),
-    // Create window (which creates the wl_surface and vk::raii::SurfaceKHR)
-	m_window(800, 600, "Zeta Engine"), // Matches Window(int, int, string)
-	m_renderer(m_context, m_instance, m_window.get_display(), m_window.get_surface(), 800, 600)
+    m_window(800, 600, "Zeta Engine"),
+    m_renderer(m_window.get_display(), m_window.get_surface(), 800, 600)
 {}
 
 void App::init() {
