@@ -19,6 +19,7 @@ Render::Render(const char* appName, const Window& window)
 {
     m_swapchainImages = m_swapchain.getImages();
     std::cout << "Vulkan RAII System Ready. Surface Linked to Wayland." << std::endl;
+    std::cout << "Using GPU: " << m_physicalDevice.getProperties().deviceName << std::endl;
 }
 
 vk::raii::Instance Render::createInstance(const char* appName) {
@@ -33,9 +34,28 @@ vk::raii::Instance Render::createInstance(const char* appName) {
 }
 
 vk::raii::PhysicalDevice Render::pickPhysicalDevice() {
-    vk::raii::PhysicalDevices devices(m_instance);
-    if (devices.empty()) throw std::runtime_error("No Vulkan GPUs found");
-    return devices[0]; 
+        // Inside your Renderer or Device selection logic
+    auto devices = m_instance.enumeratePhysicalDevices();
+    vk::raii::PhysicalDevice* selectedDevice = nullptr;
+
+    for (auto& device : devices) {
+        auto props = device.getProperties();
+        if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+            selectedDevice = &device;
+            break; // Found the high-performance GPU
+        }
+    }
+
+    // Fallback if no dGPU is found
+    if (!selectedDevice) {
+        selectedDevice = &devices[0]; 
+    }
+
+    std::cout << "Engine using GPU: " << selectedDevice->getProperties().deviceName << std::endl;
+
+    //vk::raii::PhysicalDevices devices(m_instance);
+    if (selectedDevice == nullptr) throw std::runtime_error("No Vulkan GPUs found");
+    return *selectedDevice; 
 }
 
 vk::raii::Device Render::createLogicalDevice() {
