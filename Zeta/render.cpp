@@ -18,8 +18,11 @@ vk::WaylandSurfaceCreateInfoKHR createInfo({}, display, surface);
     // Direct assignment: the returned RAII object is moved into m_surface
     m_surface = instance.createWaylandSurfaceKHR(createInfo);
     // 1. Select Physical Device with Scoring (Pick Discrete GPU)
-    vk::raii::PhysicalDevices physical_devices(vk::raii::Instance(context, {})); // Add layers here if needed
-    auto phys_device = physical_devices[0]; // Simplified for brevity; use scoring in production
+    auto phys_devices = instance.enumeratePhysicalDevices();
+    if (phys_devices.empty()) {
+        throw std::runtime_error("No Vulkan GPUs found!");
+    }
+    auto phys_device = phys_devices[0];
     
     // 2. Queue Family Selection
     auto families = phys_device.getQueueFamilyProperties();
