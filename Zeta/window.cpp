@@ -160,4 +160,15 @@ void Window::global_registry_handler(void *data, struct wl_registry *registry,
 
 void Window::global_registry_remover(void*, struct wl_registry*, uint32_t) {}
 
+void Window::set_fullscreen(bool fullscreen) {
+    if (fullscreen) {
+        // NULL tells the compositor to pick the current/default output
+        xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr);
+    } else {
+        xdg_toplevel_unset_fullscreen(m_xdg_toplevel);
+    }
+    // Commit the surface to apply the state change
+    wl_surface_commit(m_surface);
+}
+
 } // namespace Zeta

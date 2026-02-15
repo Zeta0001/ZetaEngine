@@ -8,6 +8,7 @@ void App::init() {
 void App::run() {
 
 	Zeta::Window win(800, 600, "Zeta Engine Window");
+	win.set_fullscreen(true);
 	Zeta::Render renderer("Iota App", win);
 
     while (m_running == true) {

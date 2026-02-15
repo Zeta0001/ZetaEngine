@@ -45,7 +45,7 @@ public:
     static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
     static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height, struct ::wl_array *states);
 
-    
+    void set_fullscreen(bool fullscreen);
     // Resize members
     uint32_t m_pending_serial = 0;
     bool m_resize_pending = false;

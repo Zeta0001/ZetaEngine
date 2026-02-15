@@ -107,7 +107,7 @@ vk::raii::SwapchainKHR Render::setupSwapchain(uint32_t w, uint32_t h) {
     info.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     info.imageExtent = vk::Extent2D{w, h};
     info.imageArrayLayers = 1;
-    info.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+    info.imageUsage = vk::ImageUsageFlagBits::eColorAttachment; // | vk::ImageUsageFlagBits::eTransferDst
     info.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
     info.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
     info.presentMode = vk::PresentModeKHR::eImmediate;
