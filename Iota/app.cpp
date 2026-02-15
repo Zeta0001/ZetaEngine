@@ -33,15 +33,11 @@ void App::run() {
 		m_window.poll_events();
 
         // 2. Handle Resizing Handshake
-        if (m_window.m_resize_pending) {
-            // Acknowledge Wayland Serial
-            xdg_surface_ack_configure(m_window.m_xdg_surface, m_window.m_pending_serial);
-            
-            // Recreate Swapchain
-            m_renderer.recreate_swapchain(m_window.m_width, m_window.m_height);
-            
-            m_window.m_resize_pending = false;
-        }
+		if (m_window.m_resize_pending) {
+			m_window.acknowledge_resize(); // Replaces direct access to private members
+			m_renderer.recreate_swapchain(m_window.m_width, m_window.m_height);
+			m_window.m_resize_pending = false;
+		}
 
         // 3. Render
         m_renderer.draw_frame();
