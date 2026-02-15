@@ -27,6 +27,8 @@ namespace Zeta {
         std::vector<vk::raii::Semaphore> m_image_available_semaphores;
         std::vector<vk::raii::Semaphore> m_render_finished_semaphores;
         std::vector<vk::raii::Fence> m_in_flight_fences;
+        std::vector<vk::Image> m_swapchain_images; // Raw handles retrieved from RAII swapchain
+        std::vector<vk::Fence> m_images_in_flight;
 
         // Command Pool and Buffers
         std::optional<vk::raii::CommandPool> m_command_pool;
