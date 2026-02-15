@@ -1,6 +1,7 @@
 #include "Zeta/render.hpp"
 #include <iostream>
 #include <stdexcept>
+#include <wayland-client.h>
 
 namespace Zeta {
 
@@ -12,7 +13,9 @@ Render::Render(const char* appName, const Window& window)
       m_device(createLogicalDevice()),
       m_graphicsQueue(m_device.getQueue(0, 0)), // Use family 0 for simplicity
       m_swapchain(setupSwapchain(2560, 1600)),
-      m_commandPool(m_device, vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0))
+      m_commandPool(m_device, vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0)),
+      m_wl_display(window.get_display()),
+      m_wl_surface(window.get_surface())
       //m_commandBuffer(std::move(vk::raii::CommandBuffers(m_device, {*m_commandPool, vk::CommandBufferLevel::ePrimary, 1}).front())),
 {
     m_swapchainImages = m_swapchain.getImages();
@@ -103,7 +106,7 @@ vk::raii::SwapchainKHR Render::setupSwapchain(uint32_t w, uint32_t h) {
     vk::SwapchainCreateInfoKHR info{};
     info.surface = *m_surface;
     info.minImageCount = 3;
-    info.imageFormat = vk::Format::eB8G8R8A8Unorm;
+    info.imageFormat = m_physicalDevice.getSurfaceFormatsKHR(m_surface)[0].format;
     info.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     info.imageExtent = vk::Extent2D{w, h};
     info.imageArrayLayers = 1;
@@ -189,6 +192,9 @@ void Render::drawFrame() {
     presentInfo.setImageIndices(imageIndex);
 
     (void)m_graphicsQueue.presentKHR(presentInfo);
+    wl_surface_commit(m_wl_surface);
+    wl_display_flush(m_wl_display);
+
     m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 

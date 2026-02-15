@@ -19,6 +19,7 @@ public:
     void recreate_swapchain(int width, int height);
 
 private:
+
     // INITIALIZATION ORDER IS MANDATORY FOR RAII
     vk::raii::Context m_context;
     vk::raii::Instance m_instance;
@@ -28,6 +29,9 @@ private:
     vk::raii::Queue m_graphicsQueue;
     vk::raii::SwapchainKHR m_swapchain = nullptr;
     vk::raii::CommandPool m_commandPool;
+
+    struct wl_display* m_wl_display;
+    struct wl_surface* m_wl_surface;
 
     // Synchronisation per frame in flight
     std::vector<vk::raii::Semaphore> m_imageAvailableSemaphores;
