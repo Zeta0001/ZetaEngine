@@ -46,7 +46,21 @@ void Window::config(){
     xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
 };
 
-Window::Window(int width, int height, const std::string& title) {
+Window::Window() {
+
+}
+
+Window::~Window() {
+    if (m_xdg_toplevel) xdg_toplevel_destroy(m_xdg_toplevel);
+    if (m_xdg_surface) xdg_surface_destroy(m_xdg_surface);
+    if (m_xdg_wm_base) xdg_wm_base_destroy(m_xdg_wm_base);
+    if (m_surface) wl_surface_destroy(m_surface);
+    if (m_compositor) wl_compositor_destroy(m_compositor);
+    if (m_registry) wl_registry_destroy(m_registry);
+    if (m_display) wl_display_disconnect(m_display);
+}
+
+void Window::init(int width, int height, const std::string& title) {    
     m_display = wl_display_connect(nullptr);
     if (!m_display) throw std::runtime_error("Failed to connect to Wayland display");
 
@@ -100,18 +114,7 @@ Window::Window(int width, int height, const std::string& title) {
     wl_surface_commit(m_surface);
 
     // Roundtrip 2: Sync so handles are valid before Render class starts
-    wl_display_roundtrip(m_display);
-}
-
-Window::~Window() {
-    if (m_xdg_toplevel) xdg_toplevel_destroy(m_xdg_toplevel);
-    if (m_xdg_surface) xdg_surface_destroy(m_xdg_surface);
-    if (m_xdg_wm_base) xdg_wm_base_destroy(m_xdg_wm_base);
-    if (m_surface) wl_surface_destroy(m_surface);
-    if (m_compositor) wl_compositor_destroy(m_compositor);
-    if (m_registry) wl_registry_destroy(m_registry);
-    if (m_display) wl_display_disconnect(m_display);
-}
+    wl_display_roundtrip(m_display);}
 
 void Window::poll_events() {
     // Non-blocking drain of the Wayland socket

@@ -5,18 +5,23 @@
 #include <vulkan/vulkan_raii.hpp>
 namespace Zeta {
 
-    Renderer::Renderer(struct wl_display* display, struct wl_surface* surface, uint32_t width, uint32_t height) {
-        create_context();
-        create_instance();
-        create_surface(display, surface);
-        create_device();
-        create_graphics_queue();
-        create_swapchain(width, height);
+    Renderer::Renderer() {
+
+}
+
+void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) {
+    create_context();
+    create_instance();
+    create_surface(display, surface);
+    create_device();
+    create_graphics_queue();
+    create_swapchain(width, height);
 
     // 4. Initial Setup
     create_sync_objects();
     create_command_resources();
     //recreate_swapchain(width, height);
+
 }
 
 void Renderer::create_context() {

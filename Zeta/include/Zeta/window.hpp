@@ -21,12 +21,14 @@ namespace Zeta {
 
 class Window {
 public:
-    Window(int width, int height, const std::string& title);
+    Window();
     ~Window();
 
+    void init(int width, int height, const std::string& title);
+
     // Getters for the Vulkan Renderer
-    struct wl_display* get_display() const { return m_display; }
-    struct wl_surface* get_surface() const { return m_surface; }
+    wl_display* get_display() const { return m_display; }
+    wl_surface* get_surface() const { return m_surface; }
 
     bool should_close() const { return m_should_close; }
     bool resizePending() const {return m_resize_pending; }

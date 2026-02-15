@@ -2,13 +2,12 @@
 #include "app.hpp"
 #include <vulkan/vulkan_raii.hpp>
 
-App::App() : 
-    m_window(800, 600, "Zeta Engine"),
-    m_renderer(m_window.get_display(), m_window.get_surface(), 800, 600)
-{}
+App::App() {};
 
 void App::init() {
     std::println("init app!");
+    m_window.init(800, 600, "Zeta Engine");
+	m_renderer.init(m_window.get_display(), m_window.get_surface(), 800, 600);
 };
 void App::run() {
 
