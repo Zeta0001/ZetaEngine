@@ -12,12 +12,43 @@ Render::Render(const char* appName, const Window& window)
       m_device(createLogicalDevice()),
       m_graphicsQueue(m_device.getQueue(0, 0)), // Use family 0 for simplicity
       m_swapchain(setupSwapchain(2560, 1600)),
-      m_commandPool(m_device, vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0)),
-      m_commandBuffer(std::move(vk::raii::CommandBuffers(m_device, {*m_commandPool, vk::CommandBufferLevel::ePrimary, 1}).front())),
-      m_imageAvailableSemaphore(m_device, vk::SemaphoreCreateInfo()),
-      m_renderFinishedSemaphore(m_device, vk::SemaphoreCreateInfo())
+      m_commandPool(m_device, vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0))
+      //m_commandBuffer(std::move(vk::raii::CommandBuffers(m_device, {*m_commandPool, vk::CommandBufferLevel::ePrimary, 1}).front())),
 {
     m_swapchainImages = m_swapchain.getImages();
+    // Initialize Sync Objects for Frames in Flight
+    vk::SemaphoreCreateInfo semaphoreInfo{};
+    vk::FenceCreateInfo fenceInfo{ vk::FenceCreateFlagBits::eSignaled }; // Start signaled
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        m_imageAvailableSemaphores.emplace_back(m_device, semaphoreInfo);
+        m_renderFinishedSemaphores.emplace_back(m_device, semaphoreInfo);
+        m_inFlightFences.emplace_back(m_device, fenceInfo);
+    }
+    auto queueFamilies = m_physicalDevice.getQueueFamilyProperties();
+    for (uint32_t i = 0; i < queueFamilies.size(); i++) {
+        if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+            m_graphicsQueueFamilyIndex = i;
+            break;
+        }
+    }
+    
+    // 2. Create the Command Pool using that index
+    vk::CommandPoolCreateInfo poolInfo{
+        vk::CommandPoolCreateFlagBits::eResetCommandBuffer, // Allow re-recording
+        m_graphicsQueueFamilyIndex
+    };
+    m_commandPool = vk::raii::CommandPool(m_device, poolInfo);
+    
+    // 3. Allocate the Buffers (One per frame in flight)
+    vk::CommandBufferAllocateInfo allocInfo{
+        *m_commandPool,
+        vk::CommandBufferLevel::ePrimary,
+        static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
+    };
+    
+    // Use the assignment to populate the vector
+    m_commandBuffers = vk::raii::CommandBuffers(m_device, allocInfo);
     std::cout << "Vulkan RAII System Ready. Surface Linked to Wayland." << std::endl;
     std::cout << "Using GPU: " << m_physicalDevice.getProperties().deviceName << std::endl;
 }
@@ -123,37 +154,42 @@ void Render::recreate_swapchain(int width, int height) {
 }
 
 void Render::drawFrame() {
-    auto [result, imageIndex] = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphore);
+    (void)m_device.waitForFences({*m_inFlightFences[m_currentFrame]}, true, UINT64_MAX);
+
+    // Acquire swapchain image
+    auto [result, imageIndex] = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[m_currentFrame]);
+
+    m_device.resetFences({*m_inFlightFences[m_currentFrame]});
+
+    // Reset and begin re-recording the buffer for this frame slot
+    auto& cmd = m_commandBuffers[m_currentFrame];
+    cmd.reset(); 
     
-    m_commandBuffer.reset();
-    m_commandBuffer.begin(vk::CommandBufferBeginInfo{});
+    vk::CommandBufferBeginInfo beginInfo{ vk::CommandBufferUsageFlagBits::eOneTimeSubmit };
+    cmd.begin(beginInfo);
 
-    // Simple transition and clear to make the window visible
-    vk::ClearColorValue clearColor(std::array<float, 4>{0.1f, 0.2f, 0.3f, 1.0f});
-    vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-    
-    // Note: In a real app, transition layout from eUndefined to eTransferDstOptimal first!
-    m_commandBuffer.clearColorImage(m_swapchainImages[imageIndex], vk::ImageLayout::eGeneral, clearColor, range);
+    // ... your rendering commands (Viewport, Scissor, Draw) ...
 
-    m_commandBuffer.end();
+    cmd.end();
 
-    vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    vk::SubmitInfo submitInfo(*m_imageAvailableSemaphore, waitStages, *m_commandBuffer, *m_renderFinishedSemaphore);
-    
-    m_graphicsQueue.submit(submitInfo);
+    // 4. Submit
+    vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+    vk::SubmitInfo submitInfo{};
+    submitInfo.setWaitSemaphores(*m_imageAvailableSemaphores[m_currentFrame]);
+    submitInfo.setWaitDstStageMask(waitStages);
+    submitInfo.setCommandBuffers(*cmd); // Submit the buffer indexed by currentFrame
+    submitInfo.setSignalSemaphores(*m_renderFinishedSemaphores[m_currentFrame]);
 
-    vk::PresentInfoKHR presentInfo(*m_renderFinishedSemaphore, *m_swapchain, imageIndex);
-    
-    try {
-        vk::Result result = m_graphicsQueue.presentKHR(presentInfo);
-        if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
-            // For now, just ignore it so the app doesn't crash
-        }
-    } catch (const vk::OutOfDateKHRError&) {
-        // If the window is resized, we'll implement recreation next
-    }
+    m_graphicsQueue.submit(submitInfo, *m_inFlightFences[m_currentFrame]);
 
-    m_graphicsQueue.waitIdle();
+    // 5. Present and Advance
+    vk::PresentInfoKHR presentInfo{};
+    presentInfo.setWaitSemaphores(*m_renderFinishedSemaphores[m_currentFrame]);
+    presentInfo.setSwapchains(*m_swapchain);
+    presentInfo.setImageIndices(imageIndex);
+
+    (void)m_graphicsQueue.presentKHR(presentInfo);
+    m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 } // namespace Zeta

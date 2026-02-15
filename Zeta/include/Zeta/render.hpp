@@ -26,15 +26,23 @@ private:
     vk::raii::PhysicalDevice m_physicalDevice;
     vk::raii::Device m_device;
     vk::raii::Queue m_graphicsQueue;
-    vk::raii::SwapchainKHR m_swapchain;
-    
+    vk::raii::SwapchainKHR m_swapchain = nullptr;
     vk::raii::CommandPool m_commandPool;
-    vk::raii::CommandBuffer m_commandBuffer;
-    
-    vk::raii::Semaphore m_imageAvailableSemaphore;
-    vk::raii::Semaphore m_renderFinishedSemaphore;
+
+    // Synchronisation per frame in flight
+    std::vector<vk::raii::Semaphore> m_imageAvailableSemaphores;
+    std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;
+    std::vector<vk::raii::Fence> m_inFlightFences;
+
+    // Swapchain and command resources
+
+    std::vector<vk::raii::CommandBuffer> m_commandBuffers;
 
     std::vector<vk::Image> m_swapchainImages;
+
+    // Frames in Flight configuration
+        const int MAX_FRAMES_IN_FLIGHT = 2; // Standard for parallelism without high latency
+        size_t m_currentFrame = 0;
 
     // Helper methods called in initializer list
     vk::raii::Instance createInstance(const char* appName);
