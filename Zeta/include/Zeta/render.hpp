@@ -41,8 +41,10 @@ private:
     std::vector<vk::Image> m_swapchainImages;
 
     // Frames in Flight configuration
-        const int MAX_FRAMES_IN_FLIGHT = 2; // Standard for parallelism without high latency
-        size_t m_currentFrame = 0;
+    const int MAX_FRAMES_IN_FLIGHT = 2; // Standard for parallelism without high latency
+    size_t m_currentFrame = 0;
+
+    uint32_t m_graphicsQueueFamilyIndex; // Store this for pool creation
 
     // Helper methods called in initializer list
     vk::raii::Instance createInstance(const char* appName);
