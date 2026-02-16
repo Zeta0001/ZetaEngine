@@ -350,26 +350,29 @@ void Renderer::draw_frame() {
     std::println("draw frame {}", m_currentFrameCounter);
     // 1. CPU-SIDE SYNCHRONIZATION
     // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
+    // 2. CPU Sync - Wait for work from N frames ago
     uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
     if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {
+        // This value MUST have been signaled by a previous successful submit2
         uint64_t waitValue = m_currentFrameCounter - MAX_FRAMES_IN_FLIGHT + 1;
-        // This is where the freeze happens if the previous frame didn't signal!
         m_device.waitSemaphores({ .semaphoreCount = 1, .pSemaphores = &(*m_frameTimeline), .pValues = &waitValue }, UINT64_MAX);
     }
-
-    // 3. Acquire Next Image
+    std::println("acquire next image {}", m_currentFrameCounter);
+    // 3. Acquire
     uint32_t imageIndex;
     try {
         auto result = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
         imageIndex = result.value;
     } catch (const vk::OutOfDateKHRError&) {
         m_resizeRequested = true;
-        return; // This return is safe IF you don't increment m_currentFrameCounter yet
+        return; // Safe to return because m_currentFrameCounter hasn't changed
     }
+    std::println("acquire next image pass {}", m_currentFrameCounter);
     // 3. COMMAND RECORDING
     auto& cmd = m_commandBuffers[syncIndex];
     vk::Image image = m_swapchainImages[imageIndex];
 
+    std::println("begin cmd {}", m_currentFrameCounter);
     cmd.reset();
     cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
@@ -399,7 +402,7 @@ void Renderer::draw_frame() {
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachment
     };
-
+    std::println("begin rendering {}", m_currentFrameCounter);
     cmd.beginRendering(renderingInfo);
     
     // 3. Bind and Draw
@@ -422,8 +425,7 @@ void Renderer::draw_frame() {
 
     cmd.end();
 
-    // 4. SUBMIT TO QUEUE
-    m_currentFrameCounter++; // Increment: this frame is now assigned this new value
+    uint64_t signalValue = m_currentFrameCounter + 1; 
 
     vk::SemaphoreSubmitInfo waitSemaphoreInfo{
         .semaphore = *m_imageAvailableSemaphores[syncIndex],
@@ -438,7 +440,7 @@ void Renderer::draw_frame() {
         },
         {
             .semaphore = *m_frameTimeline,
-            .value = m_currentFrameCounter, 
+            .value = signalValue, 
             .stageMask = vk::PipelineStageFlagBits2::eAllCommands
         }
     }};
@@ -455,7 +457,10 @@ void Renderer::draw_frame() {
     };
 
     m_graphicsQueue.submit2(submitInfo);
-
+    std::println("draw frame counter {}", m_currentFrameCounter);
+    // 4. SUBMIT TO QUEUE
+    m_currentFrameCounter++; // Increment: this frame is now assigned this new value
+    
     // 5. PRESENTATION
     vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
@@ -478,6 +483,7 @@ void Renderer::draw_frame() {
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
+    std::println("RECREATE SWAPCHAIN");
     if (width == 0 || height == 0) return; 
     // 1. Wait for GPU to finish using current resources
     m_device.waitIdle();
