@@ -4,6 +4,7 @@
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include "Zeta/render.hpp"
 #include <iostream>
+#include <print>
 
 #include <vulkan/vulkan_raii.hpp>
 #include "xdg-shell-client-protocol.h"
@@ -76,6 +77,7 @@ void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, ui
     create_sync_objects();
 
     create_graphics_pipeline();
+    std::println("init renderer complete");
 }
 
 void Renderer::create_context() {
@@ -340,12 +342,13 @@ vk::raii::CommandBuffers Renderer::create_command_buffers() {
 void Renderer::draw_frame() {
 
     if (m_resizeRequested) {
+        std::println("resize requested");
         m_device.waitIdle();
         recreate_swapchain(m_newWidth, m_newHeight);
         m_resizeRequested = false;
         return; 
     }
-
+    std::println("draw frame {}", m_currentFrameCounter);
     // 1. CPU-SIDE SYNCHRONIZATION
     // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
     if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {

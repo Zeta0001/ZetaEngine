@@ -19,38 +19,33 @@ void App::run() {
 
     while (m_running == true) {
 
-		Zeta::Event e;
-        while (m_eventBus.poll(e)) {
-            std::visit([this](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, Zeta::QuitEvent>) {
-                    m_running = false;
-                } else if constexpr (std::is_same_v<T, Zeta::ResizeEvent>) {
-                    m_renderer.handle_resize(arg.width, arg.height);
-                }
-            }, e);
-        }
-        
-        m_renderer.draw_frame();
-
-
-
-
 
 		m_fps.begin();
 		//std::this_thread::sleep_for(std::chrono::milliseconds(16));
 		m_window.poll_events();
-
+		std::println("poll_events");
+		// Zeta::Event e;
+        // while (m_eventBus.poll(e)) {
+        //     std::visit([this](auto&& arg) {
+        //         using T = std::decay_t<decltype(arg)>;
+        //         if constexpr (std::is_same_v<T, Zeta::QuitEvent>) {
+        //             m_running = false;
+        //         } else if constexpr (std::is_same_v<T, Zeta::ResizeEvent>) {
+        //             m_renderer.handle_resize(arg.width, arg.height);
+        //         }
+        //     }, e);
+        // }
         // 2. Handle Resizing Handshake
 		if (m_window.m_resize_pending) {
 			m_window.acknowledge_resize(); // Replaces direct access to private members
 			m_renderer.recreate_swapchain(m_window.m_width, m_window.m_height);
 			m_window.m_resize_pending = false;
+			std::println("App: if resize pending");
 		}
 
         // 3. Render
         m_renderer.draw_frame();
-
+		std::println("App: draw frame");
 		m_fps.end();
 		static int counter = 0;
 		if (counter++ > 200) {
