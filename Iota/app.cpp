@@ -4,11 +4,10 @@
 #include "app.hpp"
 #include <vulkan/vulkan_raii.hpp>
 
-App::App() : m_window(2560, 1600, "Zeta Engine"), m_renderer(){};
+App::App() : m_window(2560, 1600), m_renderer(){};
 
 void App::init() {
     std::println("init app!");
-    m_window.init();
 	m_window.set_resize_callback([this](uint32_t w, uint32_t h) {
         this->m_eventBus.push(Zeta::ResizeEvent{w, h});
     });
@@ -33,7 +32,7 @@ void App::run() {
                     m_running = false;
                 } else if constexpr (std::is_same_v<T, Zeta::ResizeEvent>) {
                     m_renderer.handle_resize(arg.width, arg.height);
-					m_window.acknowledge_resize();
+					//m_window.acknowledge_resize();
                 }
 				else if constexpr (std::is_same_v<T, Zeta::KeyEvent>) {
 					if (arg.key == 1 && arg.pressed) { // 1 is often the 'Esc' key code
