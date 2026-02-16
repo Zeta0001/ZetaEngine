@@ -12,6 +12,16 @@
 
 namespace Zeta {
 
+    static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+        vk::DebugUtilsMessageSeverityFlagBitsEXT messageSeverity, // Added vk::
+        vk::DebugUtilsMessageTypeFlagsEXT messageTypes,          // Added vk::
+        const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, // Added vk::
+        void* pUserData) {
+        
+        std::cerr << "Validation Layer: " << pCallbackData->pMessage << std::endl;
+        return VK_FALSE;
+    }
+
     std::vector<uint32_t> load_spirv(const std::string& filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
         if (!file.is_open()) throw std::runtime_error("Failed to open " + filename);
@@ -23,21 +33,31 @@ namespace Zeta {
         return buffer;
     }
 
-Renderer::Renderer(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) : 
+Renderer::Renderer() : 
     m_context(),
-    m_instance(create_instance()),
-    m_surface(create_surface(display, surface)),
-    m_physicalDevice(create_physical_device()),
-    m_device(create_logical_device()),
-    m_graphicsQueue(create_graphics_queue()),
-    m_swapchain(create_swapchain(width, height)),
-    m_commandPool(create_command_pool()),
-    m_commandBuffers(create_command_buffers())
+    m_instance(nullptr),
+    m_surface(nullptr),
+    m_physicalDevice(nullptr),
+    m_device(nullptr),
+    m_graphicsQueue(nullptr),
+    m_swapchain(nullptr),
+    m_commandPool(nullptr),
+    m_commandBuffers(nullptr)
 {
 
 }
 
-void Renderer::init() {
+void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) {
+
+    m_instance = create_instance();
+    m_surface = create_surface(display, surface);
+    m_physicalDevice = create_physical_device();
+    m_device = create_logical_device();
+    m_graphicsQueue = create_graphics_queue();
+    m_swapchain = create_swapchain(width, height);
+    m_commandPool = create_command_pool();
+    m_commandBuffers = create_command_buffers();
+
     // 4. Initial Setup
     m_swapchainImages = m_swapchain.getImages();
     // 3. Create RAII ImageViews
@@ -54,6 +74,8 @@ void Renderer::init() {
         m_swapchainImageViews.emplace_back(m_device, viewInfo);
     }
     create_sync_objects();
+
+    create_graphics_pipeline();
 }
 
 void Renderer::create_context() {
@@ -67,15 +89,30 @@ vk::raii::Instance Renderer::create_instance() {
         .engineVersion = VK_MAKE_VERSION(1, 0, 0),
         .apiVersion = VK_API_VERSION_1_3 // Required field
     };
+
+    std::vector<const char*> layers = { "VK_LAYER_KHRONOS_validation" };
     // 1. Define the required extensions for Wayland
     std::vector<const char*> extensions = {
         VK_KHR_SURFACE_EXTENSION_NAME,         // "VK_KHR_surface"
-        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME  // "VK_KHR_wayland_surface"
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME  // "VK_KHR_wayland_surface"
     };
 
+    // 2. Early Messenger (for instance create/destroy validation)
+    vk::DebugUtilsMessengerCreateInfoEXT debugInfo{
+        .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | 
+                           vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning,
+        .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | 
+                       vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | 
+                       vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+        .pfnUserCallback = debugCallback
+    };
     // 2. Set up the Instance creation info
     vk::InstanceCreateInfo createInfo{
+        .pNext = &debugInfo, // Capture instance creation errors
         .pApplicationInfo = &appInfo,
+        .enabledLayerCount = static_cast<uint32_t>(layers.size()),
+        .ppEnabledLayerNames = layers.data(),
         .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
         .ppEnabledExtensionNames = extensions.data()
     };
@@ -86,6 +123,19 @@ vk::raii::Instance Renderer::create_instance() {
 }
 
 vk::raii::SurfaceKHR Renderer::create_surface(wl_display* display, wl_surface* surface) {
+        // Creation info for the persistent messenger
+        vk::DebugUtilsMessengerCreateInfoEXT debugInfo{
+            .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | 
+                            vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning,
+            .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | 
+                        vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | 
+                        vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+            .pfnUserCallback = debugCallback
+        };
+
+        m_debugMessenger = vk::raii::DebugUtilsMessengerEXT(m_instance, debugInfo);
+
+
     vk::WaylandSurfaceCreateInfoKHR createInfo{
         .flags = {},        // Reserved for future use
         .display = display, // Your wl_display*
@@ -140,11 +190,24 @@ uint32_t Renderer::find_queue_family() {
     throw std::runtime_error("Failed to find a suitable queue family!");
 }
 
-vk::raii::Device Renderer::create_logical_device(){
-    // 1. Specify the queue(s) to be created. 
-    // Usually, you'd use a member 'queueFamilyIndex' found during PhysicalDevice selection.
-    m_queueFamilyIndex = find_queue_family();
+vk::raii::Device Renderer::create_logical_device() {
+    // 1. Setup Features (Vulkan 1.3 style)
+    vk::PhysicalDeviceVulkan13Features features13{
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE
+    };
 
+    vk::PhysicalDeviceVulkan12Features features12{
+        .pNext = &features13,
+        .timelineSemaphore = VK_TRUE
+    };
+
+    vk::PhysicalDeviceVulkan11Features features11{
+        .pNext = &features12,
+        .shaderDrawParameters = VK_TRUE // Fixed your SPIR-V error
+    };
+
+    // 2. Queue and Extension setup
     float queuePriority = 1.0f;
     vk::DeviceQueueCreateInfo queueCreateInfo{
         .queueFamilyIndex = m_queueFamilyIndex,
@@ -152,28 +215,19 @@ vk::raii::Device Renderer::create_logical_device(){
         .pQueuePriorities = &queuePriority
     };
 
-    // 2. Define required device-level extensions
-    std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME // Required for presenting images to a surface
-    };
+    std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
-    vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeature{
-        .dynamicRendering = VK_TRUE 
-    };
-
-    // 3. Set up the logical device creation info
+    // 3. Create Device
     vk::DeviceCreateInfo createInfo{
-        .pNext = &dynamicRenderingFeature,
+        .pNext = &features11, // Link the feature chain here!
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queueCreateInfo,
-        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
-        .ppEnabledExtensionNames = deviceExtensions.data()
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()
     };
 
-    // 4. Instantiate the RAII Device
-    // This requires the physical device and the create info.
     return vk::raii::Device(m_physicalDevice, createInfo);
-};
+}
 
 vk::raii::Queue Renderer::create_graphics_queue() {
     // getQueue(uint32_t queueFamilyIndex, uint32_t queueIndex)
@@ -182,6 +236,7 @@ vk::raii::Queue Renderer::create_graphics_queue() {
 }
 
 vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t height) {
+   
     // 1. Query basic surface capabilities
     auto capabilities = m_physicalDevice.getSurfaceCapabilitiesKHR(*m_surface);
     auto formats = m_physicalDevice.getSurfaceFormatsKHR(*m_surface);
@@ -209,7 +264,7 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
 
     m_swapchainFormat = surfaceFormat.format; 
     m_swapchainExtent = extent;
-
+    static int count = 0;
     // 5. Build the Swapchain info
     vk::SwapchainCreateInfoKHR createInfo{
         .surface = *m_surface,
@@ -245,13 +300,16 @@ void Renderer::create_sync_objects() {
 
     // 3. Populate vectors with RAII objects
     m_imageAvailableSemaphores.reserve(MAX_FRAMES_IN_FLIGHT);
-    m_renderFinishedSemaphores.reserve(MAX_FRAMES_IN_FLIGHT);
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         m_imageAvailableSemaphores.emplace_back(m_device, binaryInfo);
-        m_renderFinishedSemaphores.emplace_back(m_device, binaryInfo);
     }
 
+    uint32_t imageCount = m_swapchainImages.size(); 
+    m_renderFinishedSemaphores.clear();
+    for (uint32_t i = 0; i < imageCount; ++i) {
+        m_renderFinishedSemaphores.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+    }
     // 4. Create the single timeline semaphore
     m_frameTimeline = vk::raii::Semaphore(m_device, timelineInfo);
 }
@@ -295,12 +353,7 @@ void Renderer::draw_frame() {
 
     // 2. ACQUIRE IMAGE FROM SWAPCHAIN
     uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
-    
-    // acquireNextImage returns a vk::ResultValue tuple
-    auto [result, imageIndex] = m_swapchain.acquireNextImage(
-        UINT64_MAX, 
-        *m_imageAvailableSemaphores[syncIndex]
-    );
+    auto [result, imageIndex] = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
 
     // 3. COMMAND RECORDING
     auto& cmd = m_commandBuffers[syncIndex];
@@ -344,7 +397,6 @@ void Renderer::draw_frame() {
     // Set dynamic viewport/scissor (since we enabled them in the pipeline)
     cmd.setViewport(0, vk::Viewport{0.0f, 0.0f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f});
     cmd.setScissor(0, vk::Rect2D{{0, 0}, m_swapchainExtent});
-    
     cmd.draw(3, 1, 0, 0); // Our triangle!
 
     cmd.endRendering();
@@ -370,7 +422,7 @@ void Renderer::draw_frame() {
     // Signal two things: The binary semaphore for present, and the timeline for CPU sync
     std::array<vk::SemaphoreSubmitInfo, 2> signalSemaphoreInfos = {{
         {
-            .semaphore = *m_renderFinishedSemaphores[syncIndex],
+            .semaphore = *m_renderFinishedSemaphores[imageIndex],
             .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput
         },
         {
@@ -396,7 +448,7 @@ void Renderer::draw_frame() {
     // 5. PRESENTATION
     vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &(*m_renderFinishedSemaphores[syncIndex]),
+        .pWaitSemaphores = &(*m_renderFinishedSemaphores[imageIndex]),
         .swapchainCount = 1,
         .pSwapchains = &(*m_swapchain),
         .pImageIndices = &imageIndex

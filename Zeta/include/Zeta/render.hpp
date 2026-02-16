@@ -6,8 +6,8 @@
 namespace Zeta {
     class Renderer {
     public:
-    Renderer(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height);
-        void init();
+    Renderer();
+        void init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height);
         void draw_frame();
         void recreate_swapchain(uint32_t width, uint32_t height);
 
@@ -41,6 +41,7 @@ namespace Zeta {
         vk::Format m_swapchainFormat;
         std::vector<vk::raii::ImageView> m_swapchainImageViews;
 
+        vk::raii::DebugUtilsMessengerEXT m_debugMessenger{nullptr};
         // Command Pool and Buffers
 
 
