@@ -8,7 +8,7 @@ namespace Zeta {
 
 struct QuitEvent {};
 struct ResizeEvent { uint32_t width, height; };
-struct KeyEvent { int key; bool pressed; };
+struct KeyEvent { uint32_t key; bool pressed; };
 
 using Event = std::variant<QuitEvent, ResizeEvent, KeyEvent>;
 

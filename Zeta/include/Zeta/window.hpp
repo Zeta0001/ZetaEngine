@@ -20,6 +20,7 @@ struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
 
 using ResizeCallback = std::function<void(uint32_t, uint32_t)>;
+using OnKeyCallback = std::function<void(uint32_t, bool)>;
 
 namespace Zeta {
    
@@ -32,8 +33,10 @@ public:
 
 
     ResizeCallback m_onResize;
+    OnKeyCallback m_onKey;
 
     void set_resize_callback(ResizeCallback cb) { m_onResize = std::move(cb); }
+    void set_key_callback(OnKeyCallback cb) { m_onKey = std::move(cb); }
 
     // Getters for the Vulkan Renderer
     wl_display* get_display() const { return m_display; }
@@ -55,6 +58,10 @@ public:
     static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
     static void xdg_toplevel_configure(void *data, struct xdg_toplevel *toplevel, int32_t width, int32_t height, struct ::wl_array *states);
 
+    // Friends or static methods to access private members
+    static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t caps);
+    static void seat_handle_name(void *data, struct wl_seat *seat, const char *name) {}
+    
     void set_fullscreen(bool fullscreen);
     void acknowledge_resize();
     // Resize members
@@ -70,6 +77,15 @@ private:
     struct xdg_wm_base*   m_xdg_wm_base = nullptr;
     struct xdg_surface*   m_xdg_surface = nullptr;
     struct xdg_toplevel*  m_xdg_toplevel = nullptr;
+
+    struct wl_seat* m_seat = nullptr;
+    struct wl_keyboard* m_keyboard = nullptr;
+
+
+    
+    // Static keyboard handlers...
+    friend struct wl_seat_listener;
+    friend struct wl_keyboard_listener;
 
     //title bar
     struct zxdg_decoration_manager_v1* m_decoration_manager = nullptr;

@@ -19,7 +19,7 @@ static const struct wl_registry_listener registry_listener = {
     void Window::handle_xdg_surface_configure(void* data, struct xdg_surface* surface, uint32_t serial) {
         auto* win = static_cast<Window*>(data);
         win->m_pending_serial = serial;
-        win->m_resize_pending = true;
+        //win->m_resize_pending = true;
     }
 
     void Window::handle_toplevel_configure(void* data, xdg_toplevel* toplevel, 
@@ -46,8 +46,50 @@ static const struct wl_registry_listener registry_listener = {
             static_cast<Window*>(d)->m_should_close = true; 
         } 
     };
-void Window::config(){
-    xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
+
+    static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32_t serial,
+        uint32_t time, uint32_t key, uint32_t state) {
+    auto* window = static_cast<Zeta::Window*>(data);
+    bool pressed = (state == WL_KEYBOARD_KEY_STATE_PRESSED);
+
+    // Use the same callback pattern as we did for Resize
+        if (window->m_onKey) {
+            window->m_onKey(key, pressed);
+        }
+    }
+
+    static const struct wl_keyboard_listener keyboard_listener = {
+    .keymap = [](void*, wl_keyboard*, uint32_t, int, uint32_t){}, // Ignore keymap for now
+    .enter = [](void*, wl_keyboard*, uint32_t, wl_surface*, wl_array*){},
+    .leave = [](void*, wl_keyboard*, uint32_t, wl_surface*){},
+    .key = keyboard_handle_key,
+    .modifiers = [](void*, wl_keyboard*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t){},
+    .repeat_info = [](void*, wl_keyboard*, int32_t, int32_t){}
+    };
+
+    void Window::config(){
+        xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
+    };
+
+    // Seat Listener
+static const struct wl_seat_listener seat_listener = {
+    .capabilities = Window::seat_handle_capabilities,
+    .name = [](void*, wl_seat*, const char*){} 
+};
+
+// Keyboard Listener
+static const struct wl_keyboard_listener keyboard_listener = {
+    .keymap = [](void*, wl_keyboard*, uint32_t, int, uint32_t){},
+    .enter = [](void*, wl_keyboard*, uint32_t, wl_surface*, wl_array*){},
+    .leave = [](void*, wl_keyboard*, uint32_t, wl_surface*){},
+    .key = [](void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, uint32_t state) {
+        auto* self = static_cast<Zeta::Window*>(data);
+        if (self->m_onKey) {
+            self->m_onKey(key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
+        }
+    },
+    .modifiers = [](void*, wl_keyboard*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t){},
+    .repeat_info = [](void*, wl_keyboard*, int32_t, int32_t){}
 };
 
 Window::Window(int width, int height, const std::string& title) {
@@ -151,6 +193,18 @@ void Window::global_registry_handler(void *data, struct wl_registry *registry,
             }
         };
         xdg_wm_base_add_listener(self->m_xdg_wm_base, &shell_listener, nullptr);
+    }
+    else if (strcmp(interface, "wl_seat") == 0) {
+        self->m_seat = (wl_seat*)wl_registry_bind(registry, id, &wl_seat_interface, 1);
+        wl_seat_add_listener(self->m_seat, &seat_listener, self);
+    }
+}
+
+static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
+    auto* window = static_cast<Zeta::Window*>(data);
+    if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
+        window->m_keyboard = wl_seat_get_keyboard(seat);
+        wl_keyboard_add_listener(window->m_keyboard, &keyboard_listener, window);
     }
 }
 

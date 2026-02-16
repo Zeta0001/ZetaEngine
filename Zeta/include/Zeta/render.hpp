@@ -76,6 +76,7 @@ namespace Zeta {
         uint32_t m_queueFamilyIndex = 0;
 
         void create_sync_objects();
+        void refresh_sync_objects();
 
         vk::raii::PipelineLayout m_pipelineLayout{nullptr};
         vk::raii::Pipeline m_graphicsPipeline{nullptr};

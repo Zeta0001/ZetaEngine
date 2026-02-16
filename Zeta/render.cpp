@@ -340,43 +340,47 @@ vk::raii::CommandBuffers Renderer::create_command_buffers() {
 }
 
 void Renderer::draw_frame() {
-
+    // 1. HANDLE EXTERNAL RESIZE REQUESTS (from Event Bus)
     if (m_resizeRequested) {
-        std::println("resize requested");
         m_device.waitIdle();
         recreate_swapchain(m_newWidth, m_newHeight);
-        m_resizeRequested = false; 
+        m_resizeRequested = false;
     }
-    std::println("draw frame {}", m_currentFrameCounter);
-    // 1. CPU-SIDE SYNCHRONIZATION
-    // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
-    // 2. CPU Sync - Wait for work from N frames ago
+
+    // 2. CPU-GPU SYNC: WAIT FOR RESOURCE AVAILABILITY
     uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
+    
+    // If we have already filled our "in-flight" slots, wait for the oldest one to finish
     if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {
-        // This value MUST have been signaled by a previous successful submit2
         uint64_t waitValue = m_currentFrameCounter - MAX_FRAMES_IN_FLIGHT + 1;
-        m_device.waitSemaphores({ .semaphoreCount = 1, .pSemaphores = &(*m_frameTimeline), .pValues = &waitValue }, UINT64_MAX);
+        vk::SemaphoreWaitInfo waitInfo{
+            .semaphoreCount = 1,
+            .pSemaphores = &(*m_frameTimeline),
+            .pValues = &waitValue
+        };
+        // This ensures CommandBuffer[syncIndex] and BinarySemaphores[syncIndex] are safe
+        (void)m_device.waitSemaphores(waitInfo, UINT64_MAX);
     }
-    std::println("acquire next image {}", m_currentFrameCounter);
-    // 3. Acquire
+
+    // 3. ACQUIRE IMAGE (With Internal Resize Handling)
     uint32_t imageIndex;
     try {
-        auto result = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
-        imageIndex = result.value;
+        // Use syncIndex for the binary "image available" semaphore
+        auto acquireResult = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
+        imageIndex = acquireResult.value;
     } catch (const vk::OutOfDateKHRError&) {
         m_resizeRequested = true;
-        return; // Safe to return because m_currentFrameCounter hasn't changed
+        return; // Safe to return because we haven't changed the timeline state yet
     }
-    std::println("acquire next image pass {}", m_currentFrameCounter);
-    // 3. COMMAND RECORDING
-    auto& cmd = m_commandBuffers[syncIndex];
-    vk::Image image = m_swapchainImages[imageIndex];
 
-    std::println("begin cmd {}", m_currentFrameCounter);
+    // 4. COMMAND RECORDING
+    auto& cmd = m_commandBuffers[syncIndex];
     cmd.reset();
     cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
-    // 1. Transition Image: Undefined -> Color Attachment
+    vk::Image image = m_swapchainImages[imageIndex];
+
+    // Transition Undefined -> Attachment
     vk::ImageMemoryBarrier2 barrier_to_render{
         .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -385,83 +389,67 @@ void Renderer::draw_frame() {
         .image = image,
         .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
     };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_render });
+    cmd.pipelineBarrier2({ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_render });
 
-    // 2. Begin Dynamic Rendering
+    // Begin Rendering
     vk::RenderingAttachmentInfo colorAttachment{
         .imageView = *m_swapchainImageViews[imageIndex],
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .loadOp = vk::AttachmentLoadOp::eClear,
         .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = vk::ClearColorValue(std::array<float, 4>{1.0f, 0.5f, 0.0f, 1.0f}) // Orange
+        .clearValue = vk::ClearColorValue(std::array<float, 4>{1.0f, 0.5f, 0.0f, 1.0f})
     };
 
-    vk::RenderingInfo renderingInfo{
-        .renderArea = { .offset = {0, 0}, .extent = m_swapchainExtent },
+    cmd.beginRendering({
+        .renderArea = { {0, 0}, m_swapchainExtent },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachment
-    };
-    std::println("begin rendering {}", m_currentFrameCounter);
-    cmd.beginRendering(renderingInfo);
-    
-    // 3. Bind and Draw
+    });
+
+    // Draw calls
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphicsPipeline);
-    
-    // Set dynamic viewport/scissor (since we enabled them in the pipeline)
     cmd.setViewport(0, vk::Viewport{0.0f, 0.0f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f});
     cmd.setScissor(0, vk::Rect2D{{0, 0}, m_swapchainExtent});
-    cmd.draw(3, 1, 0, 0); // Our triangle!
+    cmd.draw(3, 1, 0, 0);
 
     cmd.endRendering();
 
-    // 4. Transition Image: Color Attachment -> Present
+    // Transition Attachment -> Present
     vk::ImageMemoryBarrier2 barrier_to_present = barrier_to_render;
     barrier_to_present.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
     barrier_to_present.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
     barrier_to_present.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
     barrier_to_present.newLayout = vk::ImageLayout::ePresentSrcKHR;
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_present });
+    cmd.pipelineBarrier2({ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_present });
 
     cmd.end();
 
-    uint64_t signalValue = m_currentFrameCounter + 1; 
+    // 5. SUBMIT WORK
+    uint64_t signalValue = m_currentFrameCounter + 1;
 
-    vk::SemaphoreSubmitInfo waitSemaphoreInfo{
+    vk::SemaphoreSubmitInfo waitSemaphore{
         .semaphore = *m_imageAvailableSemaphores[syncIndex],
         .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput
     };
 
-    // Signal two things: The binary semaphore for present, and the timeline for CPU sync
-    std::array<vk::SemaphoreSubmitInfo, 2> signalSemaphoreInfos = {{
-        {
-            .semaphore = *m_renderFinishedSemaphores[imageIndex],
-            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput
-        },
-        {
-            .semaphore = *m_frameTimeline,
-            .value = signalValue, 
-            .stageMask = vk::PipelineStageFlagBits2::eAllCommands
-        }
+    std::array<vk::SemaphoreSubmitInfo, 2> signalSemaphores = {{
+        { .semaphore = *m_renderFinishedSemaphores[imageIndex], .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput },
+        { .semaphore = *m_frameTimeline, .value = signalValue, .stageMask = vk::PipelineStageFlagBits2::eAllCommands }
     }};
 
-    vk::CommandBufferSubmitInfo cmdBufferInfo{ .commandBuffer = *cmd };
+    vk::CommandBufferSubmitInfo cmdInfo{ .commandBuffer = *cmd };
 
-    vk::SubmitInfo2 submitInfo{
+    m_graphicsQueue.submit2(vk::SubmitInfo2{
         .waitSemaphoreInfoCount = 1,
-        .pWaitSemaphoreInfos = &waitSemaphoreInfo,
+        .pWaitSemaphoreInfos = &waitSemaphore,
         .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &cmdBufferInfo,
-        .signalSemaphoreInfoCount = static_cast<uint32_t>(signalSemaphoreInfos.size()),
-        .pSignalSemaphoreInfos = signalSemaphoreInfos.data()
-    };
+        .pCommandBufferInfos = &cmdInfo,
+        .signalSemaphoreInfoCount = 2,
+        .pSignalSemaphoreInfos = signalSemaphores.data()
+    });
 
-    m_graphicsQueue.submit2(submitInfo);
-    std::println("draw frame counter {}", m_currentFrameCounter);
-    // 4. SUBMIT TO QUEUE
-    m_currentFrameCounter++; // Increment: this frame is now assigned this new value
-    
-    // 5. PRESENTATION
+    // 6. PRESENT
     vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &(*m_renderFinishedSemaphores[imageIndex]),
@@ -470,35 +458,37 @@ void Renderer::draw_frame() {
         .pImageIndices = &imageIndex
     };
 
-    // presentKHR returns a vk::Result
     try {
-        auto presentResult = m_graphicsQueue.presentKHR(presentInfo);
-        if (presentResult == vk::Result::eSuboptimalKHR) {
-            m_resizeRequested = true;
-        }
+        (void)m_graphicsQueue.presentKHR(presentInfo);
     } catch (const vk::OutOfDateKHRError&) {
         m_resizeRequested = true;
     }
+
+    // Only increment once we are sure the GPU has a signal to process
+    m_currentFrameCounter++;
 }
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
-    std::println("RECREATE SWAPCHAIN");
-    if (width == 0 || height == 0) return; 
-    // 1. Wait for GPU to finish using current resources
+    // 1. Guard against minimized windows (Wayland often sends 0,0)
+    if (width == 0 || height == 0) return;
+
+    // 2. Wait for GPU to finish all pending work
+    // This is the "Nuclear Option" but the only safe way during a resize
     m_device.waitIdle();
 
-    // 2. Create the new swapchain 
-    // RAII will automatically destroy the OLD m_swapchain when assigned
-    m_swapchain = create_swapchain(width, height, *m_swapchain);
+    // 3. Clear resources that depend on the old swapchain images
+    m_swapchainImageViews.clear();
 
-    // 3. Update the Image Handles (Crucial!)
+    // 4. Create the new swapchain
+    // We pass the old handle to the factory function to help the driver transition
+    vk::raii::SwapchainKHR oldSwapchain = std::move(m_swapchain);
+    m_swapchain = create_swapchain(width, height, *oldSwapchain);
+
+    // 5. Retrieve the new image handles
     m_swapchainImages = m_swapchain.getImages();
 
-    // 4. Recreate Image Views
-    m_swapchainImageViews.clear(); // Destroy old views
-    m_swapchainImageViews.reserve(m_swapchainImages.size());
-    
+    // 6. Create new Image Views
     for (auto image : m_swapchainImages) {
         vk::ImageViewCreateInfo viewInfo{
             .image = image,
@@ -508,10 +498,32 @@ void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
         };
         m_swapchainImageViews.emplace_back(m_device, viewInfo);
     }
-    
-    // 5. Update Sync Objects (Since image count might have changed)
-    create_sync_objects(); 
+
+    // 7. RECREATE SYNC OBJECTS
+    // This is critical! If the swapchain image count changed (e.g. from 2 to 3),
+    // we need a renderFinishedSemaphore for every image index.
+    refresh_sync_objects();
 }
+
+void Renderer::refresh_sync_objects() {
+    // Binary semaphores for Acquire (indexed by syncIndex)
+    // We keep these at MAX_FRAMES_IN_FLIGHT
+    m_imageAvailableSemaphores.clear();
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_imageAvailableSemaphores.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+    }
+
+    // Binary semaphores for Present (indexed by imageIndex)
+    // We must have one for every physical swapchain image
+    m_renderFinishedSemaphores.clear();
+    for (uint32_t i = 0; i < m_swapchainImages.size(); ++i) {
+        m_renderFinishedSemaphores.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+    }
+
+    // Note: We do NOT recreate the timeline semaphore here, as it tracks 
+    // global frame progress, not swapchain-specific state.
+}
+
 
 
 
