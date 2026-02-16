@@ -54,7 +54,7 @@ void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, ui
     m_physicalDevice = create_physical_device();
     m_device = create_logical_device();
     m_graphicsQueue = create_graphics_queue();
-    m_swapchain = create_swapchain(width, height);
+    m_swapchain = create_swapchain(width, height, nullptr);
     m_commandPool = create_command_pool();
     m_commandBuffers = create_command_buffers();
 
@@ -235,7 +235,7 @@ vk::raii::Queue Renderer::create_graphics_queue() {
     return vk::raii::Queue(m_device, m_queueFamilyIndex, 0);
 }
 
-vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t height) {
+vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t height, VkSwapchainKHR oldHandle) {
    
     // 1. Query basic surface capabilities
     auto capabilities = m_physicalDevice.getSurfaceCapabilitiesKHR(*m_surface);
@@ -279,7 +279,7 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
         .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
         .presentMode = vk::PresentModeKHR::eFifo, // Guaranteed to be supported
         .clipped = VK_TRUE,
-        .oldSwapchain = nullptr
+        .oldSwapchain = oldHandle
     };
 
     return vk::raii::SwapchainKHR(m_device, createInfo);
@@ -338,6 +338,14 @@ vk::raii::CommandBuffers Renderer::create_command_buffers() {
 }
 
 void Renderer::draw_frame() {
+
+    if (m_resizeRequested) {
+        m_device.waitIdle();
+        recreate_swapchain(m_newWidth, m_newHeight);
+        m_resizeRequested = false;
+        return; 
+    }
+
     // 1. CPU-SIDE SYNCHRONIZATION
     // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
     if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {
@@ -353,8 +361,15 @@ void Renderer::draw_frame() {
 
     // 2. ACQUIRE IMAGE FROM SWAPCHAIN
     uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
-    auto [result, imageIndex] = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
-
+    uint32_t imageIndex;
+    try {
+        auto acquireResult = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
+        imageIndex = acquireResult.value;
+    } catch (const vk::OutOfDateKHRError&) {
+        // Handle window resizes detected by the driver
+        m_resizeRequested = true; 
+        return;
+    }
     // 3. COMMAND RECORDING
     auto& cmd = m_commandBuffers[syncIndex];
     vk::Image image = m_swapchainImages[imageIndex];
@@ -455,11 +470,44 @@ void Renderer::draw_frame() {
     };
 
     // presentKHR returns a vk::Result
-    auto presentResult = m_graphicsQueue.presentKHR(presentInfo);
+    try {
+        auto presentResult = m_graphicsQueue.presentKHR(presentInfo);
+        if (presentResult == vk::Result::eSuboptimalKHR) {
+            m_resizeRequested = true;
+        }
+    } catch (const vk::OutOfDateKHRError&) {
+        m_resizeRequested = true;
+    }
 }
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
+    // 1. Wait for GPU to finish using current resources
+    m_device.waitIdle();
+
+    // 2. Create the new swapchain 
+    // RAII will automatically destroy the OLD m_swapchain when assigned
+    m_swapchain = create_swapchain(width, height, *m_swapchain);
+
+    // 3. Update the Image Handles (Crucial!)
+    m_swapchainImages = m_swapchain.getImages();
+
+    // 4. Recreate Image Views
+    m_swapchainImageViews.clear(); // Destroy old views
+    m_swapchainImageViews.reserve(m_swapchainImages.size());
+    
+    for (auto image : m_swapchainImages) {
+        vk::ImageViewCreateInfo viewInfo{
+            .image = image,
+            .viewType = vk::ImageViewType::e2D,
+            .format = m_swapchainFormat,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+        };
+        m_swapchainImageViews.emplace_back(m_device, viewInfo);
+    }
+    
+    // 5. Update Sync Objects (Since image count might have changed)
+    create_sync_objects(); 
 }
 
 
@@ -543,7 +591,9 @@ void Renderer::create_graphics_pipeline() {
 
 
 void Renderer::handle_resize(uint32_t width, uint32_t height) {
-
+    m_resizeRequested = true;
+    m_newWidth = width;
+    m_newHeight = height;
 
 };
 

@@ -51,6 +51,11 @@ namespace Zeta {
         std::optional<vk::raii::QueryPool> m_query_pool;
         std::vector<uint64_t> m_query_results;
         float m_timestamp_period; // Period in nanoseconds per tick
+
+
+        bool m_resizeRequested = false;
+        uint32_t m_newWidth = 0;
+        uint32_t m_newHeight = 0;
     
         void create_query_pool();
 
@@ -63,7 +68,7 @@ namespace Zeta {
         uint32_t find_queue_family();
         vk::raii::Device create_logical_device();
         vk::raii::Queue create_graphics_queue();
-        vk::raii::SwapchainKHR create_swapchain(uint32_t width, uint32_t height);
+        vk::raii::SwapchainKHR create_swapchain(uint32_t width, uint32_t height, VkSwapchainKHR oldHandle);
         vk::raii::CommandPool create_command_pool();
         vk::raii::CommandBuffers create_command_buffers();
 
