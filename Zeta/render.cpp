@@ -345,33 +345,26 @@ void Renderer::draw_frame() {
         std::println("resize requested");
         m_device.waitIdle();
         recreate_swapchain(m_newWidth, m_newHeight);
-        m_resizeRequested = false;
-        return; 
+        m_resizeRequested = false; 
     }
     std::println("draw frame {}", m_currentFrameCounter);
     // 1. CPU-SIDE SYNCHRONIZATION
     // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
+    uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
     if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {
         uint64_t waitValue = m_currentFrameCounter - MAX_FRAMES_IN_FLIGHT + 1;
-        vk::SemaphoreWaitInfo waitInfo{
-            .semaphoreCount = 1,
-            .pSemaphores = &(*m_frameTimeline),
-            .pValues = &waitValue
-        };
-        // Wait indefinitely for the GPU to catch up
-        auto waitResult = m_device.waitSemaphores(waitInfo, UINT64_MAX);
+        // This is where the freeze happens if the previous frame didn't signal!
+        m_device.waitSemaphores({ .semaphoreCount = 1, .pSemaphores = &(*m_frameTimeline), .pValues = &waitValue }, UINT64_MAX);
     }
 
-    // 2. ACQUIRE IMAGE FROM SWAPCHAIN
-    uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
+    // 3. Acquire Next Image
     uint32_t imageIndex;
     try {
-        auto acquireResult = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
-        imageIndex = acquireResult.value;
+        auto result = m_swapchain.acquireNextImage(UINT64_MAX, *m_imageAvailableSemaphores[syncIndex]);
+        imageIndex = result.value;
     } catch (const vk::OutOfDateKHRError&) {
-        // Handle window resizes detected by the driver
-        m_resizeRequested = true; 
-        return;
+        m_resizeRequested = true;
+        return; // This return is safe IF you don't increment m_currentFrameCounter yet
     }
     // 3. COMMAND RECORDING
     auto& cmd = m_commandBuffers[syncIndex];
@@ -485,6 +478,7 @@ void Renderer::draw_frame() {
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) return; 
     // 1. Wait for GPU to finish using current resources
     m_device.waitIdle();
 
