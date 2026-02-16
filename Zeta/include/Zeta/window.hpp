@@ -2,6 +2,8 @@
 
 #include <string>
 #include <cstdint>
+#include <Zeta/events.hpp>
+#include <functional>
 // Wayland C types forward declared in global namespace
 struct wl_display;
 struct wl_registry;
@@ -17,14 +19,21 @@ struct wl_array;
 struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
 
-namespace Zeta {
+using ResizeCallback = std::function<void(uint32_t, uint32_t)>;
 
+namespace Zeta {
+   
 class Window {
 public:
     Window(int width, int height, const std::string& title);
     ~Window();
 
     void init();
+
+
+    ResizeCallback m_onResize;
+
+    void set_resize_callback(ResizeCallback cb) { m_onResize = std::move(cb); }
 
     // Getters for the Vulkan Renderer
     wl_display* get_display() const { return m_display; }

@@ -540,4 +540,12 @@ void Renderer::create_graphics_pipeline() {
 }
 
 
+
+
+void Renderer::handle_resize(uint32_t width, uint32_t height) {
+
+
+};
+
+
 } // namespace Zeta

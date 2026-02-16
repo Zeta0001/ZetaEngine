@@ -10,7 +10,7 @@ namespace Zeta {
         void init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height);
         void draw_frame();
         void recreate_swapchain(uint32_t width, uint32_t height);
-
+        void handle_resize(uint32_t width, uint32_t height);
     private:
         // Config
         //const int MAX_FRAMES_IN_FLIGHT = 2;

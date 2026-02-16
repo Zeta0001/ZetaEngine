@@ -22,13 +22,18 @@ static const struct wl_registry_listener registry_listener = {
         win->m_resize_pending = true;
     }
 
-    void Window::handle_toplevel_configure(void* data, struct xdg_toplevel* toplevel, int32_t w, int32_t h, struct ::wl_array* states) {
-        auto* win = static_cast<Window*>(data);
-        if (w > 0 && h > 0) {
-            win->m_width = w;
-            win->m_height = h;
+    void Window::handle_toplevel_configure(void* data, xdg_toplevel* toplevel, 
+        int32_t width, int32_t height, wl_array* states) {
+        auto* zetaWindow = static_cast<Zeta::Window*>(data);
+
+            // Wayland sends 0,0 if it wants the client to decide
+            if (width > 0 && height > 0) {
+                if (zetaWindow->m_onResize) {
+                zetaWindow->m_onResize(static_cast<uint32_t>(width), 
+                    static_cast<uint32_t>(height));
+                }
+            }
         }
-    }
 
     // 2. Define the listener structs SECOND (now they can see the functions)
     static const struct xdg_surface_listener surface_listener = { 

@@ -5,6 +5,7 @@
 #include <Zeta/time.hpp>
 #include <Zeta/window.hpp>
 #include <Zeta/render.hpp>
+#include <Zeta/events.hpp>
 
 class App {
     private:
@@ -14,7 +15,8 @@ class App {
 
     Zeta::Window m_window;           // 3. Window (contains the Surface)
     Zeta::Renderer m_renderer;  
-
+    Zeta::EventBus m_eventBus;
+    
     public:
     App();
     void init();

@@ -35,6 +35,7 @@ add_library(Zeta STATIC
     time.cpp 
     window.cpp 
     render.cpp
+    events.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.c
     ${CMAKE_CURRENT_BINARY_DIR}/xdg-decoration-unstable-v1-protocol.c
 )
