@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include <vulkan/vulkan_raii.hpp>
+#include "xdg-shell-client-protocol.h"
 namespace Zeta {
 
     Renderer::Renderer() {
@@ -10,6 +11,9 @@ namespace Zeta {
 }
 
 void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) {
+
+    m_display = display;
+
     create_context();
     create_instance();
     create_surface(display, surface);
@@ -20,6 +24,8 @@ void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, ui
     // 4. Initial Setup
     create_sync_objects();
     create_command_resources();
+
+
     //recreate_swapchain(width, height);
 
 }
@@ -48,24 +54,37 @@ void Renderer::create_surface(struct wl_display* display, struct wl_surface* sur
 }
 
 void Renderer::create_device() {
+    // 1. Pick Physical Device
     auto phys_devices = m_instance->enumeratePhysicalDevices();
-    auto& phys_device = phys_devices.front(); // Simplified; use scoring here
+    
+    // Basic scoring to pick Discrete GPU (NVIDIA)
+    for (auto& p : phys_devices) {
+        if (p.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+            m_physical_device.emplace(p);
+            break;
+        }
+    }
+    
+    // Fallback if no dGPU found
+    if (!m_physical_device) m_physical_device.emplace(phys_devices.front());
 
-    // Find queue family
-    auto families = phys_device.getQueueFamilyProperties();
+    // 2. Create Logical Device
+    // Find a graphics queue family
+    auto families = m_physical_device->getQueueFamilyProperties();
+    uint32_t graphicsIndex = 0;
     for (uint32_t i = 0; i < families.size(); ++i) {
         if (families[i].queueFlags & vk::QueueFlagBits::eGraphics) {
-            m_queue_family_index = i;
+            graphicsIndex = i;
             break;
         }
     }
 
     float priority = 1.0f;
-    vk::DeviceQueueCreateInfo queue_info({}, m_queue_family_index, 1, &priority);
-    std::vector<const char*> extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    vk::DeviceQueueCreateInfo queue_info({}, graphicsIndex, 1, &priority);
+    std::vector<const char*> device_extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     
-    vk::DeviceCreateInfo device_info({}, queue_info, {}, extensions);
-    m_device.emplace(phys_device, device_info);
+    vk::DeviceCreateInfo device_info({}, queue_info, {}, device_extensions);
+    m_device.emplace(*m_physical_device, device_info);
 }
 
 void Renderer::create_graphics_queue() {
@@ -85,13 +104,20 @@ void Renderer::create_swapchain(uint32_t width, uint32_t height) {
 
     // 1. Create the RAII swapchain
     m_swapchain.emplace(*m_device, info);
-
-    // 2. Retrieve the image handles (MANDATORY)
     m_swapchain_images = m_swapchain->getImages();
+    uint32_t image_count = static_cast<uint32_t>(m_swapchain_images.size());
 
-    // 3. Initialize the synchronization tracking vector
-    // This ensures we have a slot for every image acquired from this swapchain
-    m_images_in_flight.assign(m_swapchain_images.size(), nullptr);
+    // Recreate semaphores to match the actual number of images
+    m_image_available_sems.clear();
+    m_render_finished_sems.clear();
+    
+    vk::SemaphoreCreateInfo sem_info;
+    for (uint32_t i = 0; i < image_count; ++i) {
+        m_image_available_sems.emplace_back(*m_device, sem_info);
+        m_render_finished_sems.emplace_back(*m_device, sem_info);
+    }
+    
+    m_images_in_flight.assign(image_count, nullptr);
 }
 
 void Renderer::create_sync_objects() {
@@ -100,8 +126,8 @@ void Renderer::create_sync_objects() {
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         // Use *m_device to pass the vk::raii::Device reference
-        m_image_available_semaphores.emplace_back(*m_device, sem_info);
-        m_render_finished_semaphores.emplace_back(*m_device, sem_info);
+        m_image_available_sems.emplace_back(*m_device, sem_info);
+        m_render_finished_sems.emplace_back(*m_device, sem_info);
         m_in_flight_fences.emplace_back(*m_device, fence_info);
     }
 }
@@ -121,38 +147,65 @@ void Renderer::create_command_resources() {
     );
     // RAII CommandBuffers returns a vector, so we can assign directly
     m_command_buffers = m_device->allocateCommandBuffers(alloc_info);
+
+    // In Renderer.cpp / create_command_resources()
+vk::BufferCreateInfo bufferInfo({}, 64, vk::BufferUsageFlagBits::eTransferDst);
+m_dummy_buffer.emplace(*m_device, bufferInfo);
+
+auto memReqs = m_dummy_buffer->getMemoryRequirements();
+vk::MemoryAllocateInfo allocInfo(memReqs.size, findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+m_dummy_memory.emplace(*m_device, allocInfo);
+
+m_dummy_buffer->bindMemory(*m_dummy_memory, 0);
 }
 
 void Renderer::draw_frame() {
-    // 1. Wait for the CPU-GPU sync fence for this "frame slot"
-    // Use the RAII fence from our vector
+    // 1. Wait for the CPU-GPU sync fence for this 'slot' (0 or 1)
     if (m_device->waitForFences({*m_in_flight_fences[m_current_frame]}, true, UINT64_MAX) != vk::Result::eSuccess) return;
 
-    // 2. Acquire the next image
+    // 2. Acquire Next Image
     uint32_t image_index;
     try {
-        auto result = m_swapchain->acquireNextImage(UINT64_MAX, *m_image_available_semaphores[m_current_frame]);
+        // Use the semaphore associated with the IMAGE slot
+        // Note: You might need a temporary semaphore if you don't know the index yet,
+        // but typically we use m_image_available_sems[m_current_frame] and then 
+        // swap, but for your errors, indexing by image_index is the "Vulkan Guide" fix.
+        
+        // BETTER: Use a pool of semaphores for acquisition, but for now:
+        auto result = m_swapchain->acquireNextImage(UINT64_MAX, *m_image_available_sems[m_current_frame]);
         image_index = result.value;
-    } catch (const vk::OutOfDateKHRError&) {
-        // Handle resize in main loop
-        return; 
-    }
+    } catch (const vk::OutOfDateKHRError&) { return; }
 
-    // 3. Optimization/Safety: If the acquired image is still being used by a 
-    // previous frame, wait for that specific image's fence too.
+    // 3. Fence Tracking (Prevent colliding with a frame still rendering this image)
     if (m_images_in_flight[image_index]) {
         (void)m_device->waitForFences({m_images_in_flight[image_index]}, true, UINT64_MAX);
     }
-    // Mark this image as being in-flight with the current frame's fence
     m_images_in_flight[image_index] = *m_in_flight_fences[m_current_frame];
 
-    // 4. Reset the fence now that we are starting new work
     m_device->resetFences({*m_in_flight_fences[m_current_frame]});
-
     // 5. Record Commands
     auto& cmd = m_command_buffers[m_current_frame];
     cmd.reset();
     cmd.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+
+    cmd.fillBuffer(**m_dummy_buffer, 0, 64, 0);
+
+    // Barrier to ensure the fill is recognized before presentation
+    vk::BufferMemoryBarrier releaseBarrier(
+        vk::AccessFlagBits::eTransferWrite,
+        vk::AccessFlagBits::eMemoryRead,
+        VK_QUEUE_FAMILY_IGNORED,
+        VK_QUEUE_FAMILY_IGNORED,
+        **m_dummy_buffer,
+        0, 64
+    );
+
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer,
+        vk::PipelineStageFlagBits::eBottomOfPipe,
+        {}, nullptr, releaseBarrier, nullptr
+    );
 
     // FIX: Mandatory Layout Transition (Even if drawing nothing)
     // If you use a RenderPass, the 'initialLayout' and 'finalLayout' do this for you.
@@ -179,29 +232,28 @@ void Renderer::draw_frame() {
 
     cmd.end();
 
-    // 6. Submit
+    // 4. Submit
     vk::PipelineStageFlags wait_stages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+    
     vk::SubmitInfo submit_info(
-        *m_image_available_semaphores[m_current_frame], 
+        *m_image_available_sems[m_current_frame], // Wait for acquisition
         wait_stages, 
-        *cmd, 
-        *m_render_finished_semaphores[m_current_frame]
+        *m_command_buffers[m_current_frame], 
+        *m_render_finished_sems[image_index]     // Signal for this SPECIFIC image
     );
     
     m_graphics_queue->submit(submit_info, *m_in_flight_fences[m_current_frame]);
 
-    // 7. Present
+    // 5. Present
     vk::PresentInfoKHR present_info(
-        *m_render_finished_semaphores[m_current_frame], 
+        *m_render_finished_sems[image_index],    // Wait for the specific image to finish
         **m_swapchain, 
         image_index
     );
     
-    try {
-        (void)m_graphics_queue->presentKHR(present_info);
-    } catch (const vk::OutOfDateKHRError&) {
-        // Handle resize
-    }
+    (void)m_graphics_queue->presentKHR(present_info);
+
+    wl_display_flush(m_display); 
 
     m_current_frame = (m_current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -231,9 +283,32 @@ void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
 
     m_swapchain_images = m_swapchain->getImages();
 
+
+    // Recreate semaphores to match the actual number of images
+    m_image_available_sems.clear();
+    m_render_finished_sems.clear();
+    
+    vk::SemaphoreCreateInfo sem_info;
+    for (uint32_t i = 0; i < m_swapchain_images.size(); ++i) {
+        m_image_available_sems.emplace_back(*m_device, sem_info);
+        m_render_finished_sems.emplace_back(*m_device, sem_info);
+    }
+
     // 3. Reset the image-to-fence tracking vector
     // This must match the number of images in the new swapchain
     m_images_in_flight.assign(m_swapchain_images.size(), nullptr);
+}
+
+
+
+uint32_t Renderer::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+    auto memProperties = m_physical_device->getMemoryProperties();
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    throw std::runtime_error("failed to find suitable memory type!");
 }
 
 } // namespace Zeta

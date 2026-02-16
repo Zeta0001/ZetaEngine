@@ -116,18 +116,25 @@ void Window::init(int width, int height, const std::string& title) {
     // Roundtrip 2: Sync so handles are valid before Render class starts
     wl_display_roundtrip(m_display);}
 
-void Window::poll_events() {
-    // Non-blocking drain of the Wayland socket
-    wl_display_dispatch_pending(m_display);
-    wl_display_flush(m_display);
-
-    // Only if you have a specific need to read (like input), use poll()
-    struct pollfd pfd = { .fd = wl_display_get_fd(m_display), .events = POLLIN };
-    if (poll(&pfd, 1, 0) > 0) {
-        // Only read if there is data, never block
-        wl_display_dispatch(m_display); 
+    void Window::poll_events() {
+        // 1. Force-send all pending requests to the compositor (like ACK or Commit)
+        wl_display_flush(m_display);
+    
+        // 2. Non-blocking check for events from the compositor
+        // If you don't do this, Vulkan will hang waiting for a "Buffer Release"
+        while (wl_display_prepare_read(m_display) != 0) {
+            wl_display_dispatch_pending(m_display);
+        }
+        
+        // 3. Read and Dispatch
+        struct pollfd pfd = { .fd = wl_display_get_fd(m_display), .events = POLLIN };
+        if (poll(&pfd, 1, 0) > 0) {
+            wl_display_read_events(m_display);
+            wl_display_dispatch_pending(m_display);
+        } else {
+            wl_display_cancel_read(m_display);
+        }
     }
-}
 
 void Window::global_registry_handler(void *data, struct wl_registry *registry, 
                                      uint32_t id, const char *interface, uint32_t version) {

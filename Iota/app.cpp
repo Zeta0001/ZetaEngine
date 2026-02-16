@@ -6,7 +6,7 @@ App::App() {};
 
 void App::init() {
     std::println("init app!");
-    m_window.init(800, 600, "Zeta Engine");
+    m_window.init(2560, 1600, "Zeta Engine");
 	m_renderer.init(m_window.get_display(), m_window.get_surface(), 800, 600);
 };
 void App::run() {
