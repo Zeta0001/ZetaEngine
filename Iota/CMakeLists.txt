@@ -15,7 +15,7 @@ app.cpp
 )
 
 set_target_properties(Iota PROPERTIES OUTPUT_NAME_RELEASE "Iota")
-set_target_properties(Iota PROPERTIES OUTPUT_NAME_DEBUG "Iota_d")
+#set_target_properties(Iota PROPERTIES OUTPUT_NAME_DEBUG "Iota_d")
 
 
 target_link_libraries(Iota PRIVATE Zeta::Zeta)

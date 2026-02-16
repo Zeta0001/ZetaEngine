@@ -7,7 +7,21 @@
 
 #include <vulkan/vulkan_raii.hpp>
 #include "xdg-shell-client-protocol.h"
+
+#include <fstream>
+
 namespace Zeta {
+
+    std::vector<uint32_t> load_spirv(const std::string& filename) {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        if (!file.is_open()) throw std::runtime_error("Failed to open " + filename);
+    
+        size_t fileSize = (size_t)file.tellg();
+        std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+        return buffer;
+    }
 
 Renderer::Renderer(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) : 
     m_context(),
@@ -26,6 +40,19 @@ Renderer::Renderer(wl_display* display, wl_surface* surface, uint32_t width, uin
 void Renderer::init() {
     // 4. Initial Setup
     m_swapchainImages = m_swapchain.getImages();
+    // 3. Create RAII ImageViews
+    m_swapchainImageViews.clear();
+    m_swapchainImageViews.reserve(m_swapchainImages.size());
+
+    for (auto image : m_swapchainImages) {
+        vk::ImageViewCreateInfo viewInfo{
+            .image = image,
+            .viewType = vk::ImageViewType::e2D,
+            .format = m_swapchainFormat,
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+        };
+        m_swapchainImageViews.emplace_back(m_device, viewInfo);
+    }
     create_sync_objects();
 }
 
@@ -130,8 +157,13 @@ vk::raii::Device Renderer::create_logical_device(){
         VK_KHR_SWAPCHAIN_EXTENSION_NAME // Required for presenting images to a surface
     };
 
+    vk::PhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeature{
+        .dynamicRendering = VK_TRUE 
+    };
+
     // 3. Set up the logical device creation info
     vk::DeviceCreateInfo createInfo{
+        .pNext = &dynamicRenderingFeature,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queueCreateInfo,
         .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
@@ -174,6 +206,9 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
     if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
         imageCount = capabilities.maxImageCount;
     }
+
+    m_swapchainFormat = surfaceFormat.format; 
+    m_swapchainExtent = extent;
 
     // 5. Build the Swapchain info
     vk::SwapchainCreateInfoKHR createInfo{
@@ -274,32 +309,52 @@ void Renderer::draw_frame() {
     cmd.reset();
     cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
-    // Transition: Undefined -> Transfer Destination
-    vk::ImageMemoryBarrier2 barrier_to_clear{
-        .dstStageMask = vk::PipelineStageFlagBits2::eClear,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+    // 1. Transition Image: Undefined -> Color Attachment
+    vk::ImageMemoryBarrier2 barrier_to_render{
+        .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
         .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .image = image,
         .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
     };
-    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_clear });
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_render });
 
-    // CLEAR TO ORANGE
-    vk::ClearColorValue orange_color(std::array<float, 4>{1.0f, 0.5f, 0.0f, 1.0f});
-    vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-    cmd.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, orange_color, range);
-
-    // Transition: Transfer Destination -> Present
-    vk::ImageMemoryBarrier2 barrier_to_present{
-        .srcStageMask = vk::PipelineStageFlagBits2::eClear,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands, // Required for present safety
-        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-        .newLayout = vk::ImageLayout::ePresentSrcKHR,
-        .image = image,
-        .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+    // 2. Begin Dynamic Rendering
+    vk::RenderingAttachmentInfo colorAttachment{
+        .imageView = *m_swapchainImageViews[imageIndex],
+        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp = vk::AttachmentLoadOp::eClear,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .clearValue = vk::ClearColorValue(std::array<float, 4>{1.0f, 0.5f, 0.0f, 1.0f}) // Orange
     };
+
+    vk::RenderingInfo renderingInfo{
+        .renderArea = { .offset = {0, 0}, .extent = m_swapchainExtent },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachment
+    };
+
+    cmd.beginRendering(renderingInfo);
+    
+    // 3. Bind and Draw
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_graphicsPipeline);
+    
+    // Set dynamic viewport/scissor (since we enabled them in the pipeline)
+    cmd.setViewport(0, vk::Viewport{0.0f, 0.0f, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f});
+    cmd.setScissor(0, vk::Rect2D{{0, 0}, m_swapchainExtent});
+    
+    cmd.draw(3, 1, 0, 0); // Our triangle!
+
+    cmd.endRendering();
+
+    // 4. Transition Image: Color Attachment -> Present
+    vk::ImageMemoryBarrier2 barrier_to_present = barrier_to_render;
+    barrier_to_present.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    barrier_to_present.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+    barrier_to_present.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    barrier_to_present.newLayout = vk::ImageLayout::ePresentSrcKHR;
     cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_present });
 
     cmd.end();
@@ -353,6 +408,83 @@ void Renderer::draw_frame() {
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
+}
+
+
+
+void Renderer::create_graphics_pipeline() {
+    // 1. Create Shader Modules
+    auto vertCode = load_spirv("shaders/triangle.vert.spv");
+    auto fragCode = load_spirv("shaders/triangle.frag.spv");
+
+    vk::raii::ShaderModule vertModule(m_device, vk::ShaderModuleCreateInfo{
+        .codeSize = vertCode.size() * sizeof(uint32_t),
+        .pCode = vertCode.data()
+    });
+
+    vk::raii::ShaderModule fragModule(m_device, vk::ShaderModuleCreateInfo{
+        .codeSize = fragCode.size() * sizeof(uint32_t),
+        .pCode = fragCode.data()
+    });
+
+    // 2. Define Shader Stages
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
+        { .stage = vk::ShaderStageFlagBits::eVertex, .module = *vertModule, .pName = "main" },
+        { .stage = vk::ShaderStageFlagBits::eFragment, .module = *fragModule, .pName = "main" }
+    }};
+
+    // 3. Fixed Function States (Minimum for Triangle)
+    vk::PipelineVertexInputStateCreateInfo vertexInput{};
+    vk::PipelineInputAssemblyStateCreateInfo inputAssembly{ .topology = vk::PrimitiveTopology::eTriangleList };
+    
+    // Use dynamic viewport/scissor to avoid recreating pipeline on resize
+    std::array<vk::DynamicState, 2> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+    vk::PipelineDynamicStateCreateInfo dynamicState{
+        .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+        .pDynamicStates = dynamicStates.data()
+    };
+    vk::PipelineViewportStateCreateInfo viewportState{ .viewportCount = 1, .scissorCount = 1 };
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer{
+        .cullMode = vk::CullModeFlagBits::eBack,
+        .frontFace = vk::FrontFace::eClockwise,
+        .lineWidth = 1.0f
+    };
+
+    vk::PipelineMultisampleStateCreateInfo multisampling{ .rasterizationSamples = vk::SampleCountFlagBits::e1 };
+
+    vk::PipelineColorBlendAttachmentState colorBlendAttachment{
+        .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | 
+                          vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+    };
+    vk::PipelineColorBlendStateCreateInfo colorBlending{
+        .attachmentCount = 1, .pAttachments = &colorBlendAttachment
+    };
+
+    // 4. Create Pipeline Layout
+    m_pipelineLayout = vk::raii::PipelineLayout(m_device, vk::PipelineLayoutCreateInfo{});
+
+    vk::PipelineRenderingCreateInfo renderingInfo{
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &m_swapchainFormat // e.g., vk::Format::eB8G8R8A8Srgb
+    };
+    // 5. Create Graphics Pipeline
+    vk::GraphicsPipelineCreateInfo pipelineInfo{
+        .pNext = &renderingInfo, // Attach format info here
+        .stageCount = 2,
+        .pStages = shaderStages.data(),
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &colorBlending,
+        .pDynamicState = &dynamicState,
+        .layout = *m_pipelineLayout,
+        .renderPass = nullptr // Note: Use VK_KHR_dynamic_rendering if no RenderPass
+    };
+
+    m_graphicsPipeline = vk::raii::Pipeline(m_device, nullptr, pipelineInfo);
 }
 
 

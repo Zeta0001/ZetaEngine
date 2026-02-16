@@ -42,7 +42,7 @@ add_library(Zeta STATIC
 # NOW you can set the definitions
 target_compile_definitions(Zeta PUBLIC VK_USE_PLATFORM_WAYLAND_KHR)
 
-set_target_properties(Zeta PROPERTIES DEBUG_POSTFIX "_d")
+#set_target_properties(Zeta PROPERTIES DEBUG_POSTFIX "_d")
 
 target_include_directories(Zeta 
 PUBLIC 

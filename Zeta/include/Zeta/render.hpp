@@ -37,7 +37,9 @@ namespace Zeta {
         uint64_t m_currentFrameCounter = 0;
 
         std::vector<vk::Image> m_swapchainImages;
-
+        vk::Extent2D m_swapchainExtent;
+        vk::Format m_swapchainFormat;
+        std::vector<vk::raii::ImageView> m_swapchainImageViews;
 
         // Command Pool and Buffers
 
@@ -68,5 +70,9 @@ namespace Zeta {
         uint32_t m_queueFamilyIndex = 0;
 
         void create_sync_objects();
+
+        vk::raii::PipelineLayout m_pipelineLayout{nullptr};
+        vk::raii::Pipeline m_graphicsPipeline{nullptr};
+        void create_graphics_pipeline();
     };
 }
