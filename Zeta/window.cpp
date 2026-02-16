@@ -2,7 +2,6 @@
 #include "Zeta/window.hpp"
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
-#include "xdg-decoration-unstable-v1-client-protocol.h"
 #include <cstring>
 #include <stdexcept>
 #include <iostream>
@@ -46,21 +45,9 @@ void Window::config(){
     xdg_surface_ack_configure(m_xdg_surface, m_pending_serial);
 };
 
-Window::Window() {
-
-}
-
-Window::~Window() {
-    if (m_xdg_toplevel) xdg_toplevel_destroy(m_xdg_toplevel);
-    if (m_xdg_surface) xdg_surface_destroy(m_xdg_surface);
-    if (m_xdg_wm_base) xdg_wm_base_destroy(m_xdg_wm_base);
-    if (m_surface) wl_surface_destroy(m_surface);
-    if (m_compositor) wl_compositor_destroy(m_compositor);
-    if (m_registry) wl_registry_destroy(m_registry);
-    if (m_display) wl_display_disconnect(m_display);
-}
-
-void Window::init(int width, int height, const std::string& title) {    
+Window::Window(int width, int height, const std::string& title) {
+    m_width = width;
+    m_height = height;
     m_display = wl_display_connect(nullptr);
     if (!m_display) throw std::runtime_error("Failed to connect to Wayland display");
 
@@ -101,13 +88,6 @@ void Window::init(int width, int height, const std::string& title) {
     // };
     xdg_toplevel_add_listener(m_xdg_toplevel, &toplevel_listener, this);
 
-    if (m_decoration_manager) {
-        struct zxdg_toplevel_decoration_v1* decoration = 
-            zxdg_decoration_manager_v1_get_toplevel_decoration(m_decoration_manager, m_xdg_toplevel);
-        
-        // Request server-side decorations (the title bar)
-        zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-    }
 
     // Initial commit
     wl_surface_set_buffer_scale(m_surface, 1); 
@@ -134,6 +114,20 @@ void Window::init(int width, int height, const std::string& title) {
         } else {
             wl_display_cancel_read(m_display);
         }
+}
+
+Window::~Window() {
+    if (m_xdg_toplevel) xdg_toplevel_destroy(m_xdg_toplevel);
+    if (m_xdg_surface) xdg_surface_destroy(m_xdg_surface);
+    if (m_xdg_wm_base) xdg_wm_base_destroy(m_xdg_wm_base);
+    if (m_surface) wl_surface_destroy(m_surface);
+    if (m_compositor) wl_compositor_destroy(m_compositor);
+    if (m_registry) wl_registry_destroy(m_registry);
+    if (m_display) wl_display_disconnect(m_display);
+}
+
+void Window::init() {    
+   
     }
 
 void Window::global_registry_handler(void *data, struct wl_registry *registry, 
@@ -152,10 +146,6 @@ void Window::global_registry_handler(void *data, struct wl_registry *registry,
             }
         };
         xdg_wm_base_add_listener(self->m_xdg_wm_base, &shell_listener, nullptr);
-    }
-    else if (std::strcmp(interface, "zxdg_decoration_manager_v1") == 0) {
-        self->m_decoration_manager = (zxdg_decoration_manager_v1*)wl_registry_bind(
-            registry, id, &zxdg_decoration_manager_v1_interface, 1);
     }
 }
 

@@ -1,4 +1,7 @@
+#ifndef VK_USE_PLATFORM_WAYLAND_KHR
 #define VK_USE_PLATFORM_WAYLAND_KHR
+#endif
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #include "Zeta/render.hpp"
 #include <iostream>
 
@@ -6,309 +9,351 @@
 #include "xdg-shell-client-protocol.h"
 namespace Zeta {
 
-    Renderer::Renderer() {
+Renderer::Renderer(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) : 
+    m_context(),
+    m_instance(create_instance()),
+    m_surface(create_surface(display, surface)),
+    m_physicalDevice(create_physical_device()),
+    m_device(create_logical_device()),
+    m_graphicsQueue(create_graphics_queue()),
+    m_swapchain(create_swapchain(width, height)),
+    m_commandPool(create_command_pool()),
+    m_commandBuffers(create_command_buffers())
+{
 
 }
 
-void Renderer::init(wl_display* display, wl_surface* surface, uint32_t width, uint32_t height) {
-
-    m_display = display;
-
-    create_context();
-    create_instance();
-    create_surface(display, surface);
-    create_device();
-    create_graphics_queue();
-    create_swapchain(width, height);
-
+void Renderer::init() {
     // 4. Initial Setup
+    m_swapchainImages = m_swapchain.getImages();
     create_sync_objects();
-    create_command_resources();
-
-
-    //recreate_swapchain(width, height);
-
 }
 
 void Renderer::create_context() {
-    m_context.emplace(); // Default constructor for Context
 }
 
-void Renderer::create_instance() {
-    static const std::vector<const char*> layers = { "VK_LAYER_KHRONOS_validation" };
-    static const std::vector<const char*> extensions = { 
-        vk::KHRSurfaceExtensionName, 
-        vk::KHRWaylandSurfaceExtensionName 
+vk::raii::Instance Renderer::create_instance() {
+    vk::ApplicationInfo appInfo{
+        .pApplicationName = "Zeta App", // Quotes added
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "Zeta Engine",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_3 // Required field
     };
-    vk::ApplicationInfo appInfo("Zeta", 1, "Zeta", 1, vk::ApiVersion13);
-    
-    vk::InstanceCreateInfo info({}, &appInfo, layers, extensions);
-    
-    // Use emplace to call the Instance constructor: (context, info)
-    m_instance.emplace(*m_context, info);
+    // 1. Define the required extensions for Wayland
+    std::vector<const char*> extensions = {
+        VK_KHR_SURFACE_EXTENSION_NAME,         // "VK_KHR_surface"
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME  // "VK_KHR_wayland_surface"
+    };
+
+    // 2. Set up the Instance creation info
+    vk::InstanceCreateInfo createInfo{
+        .pApplicationInfo = &appInfo,
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()
+    };
+
+    // 3. Return the RAII Instance
+    // Note: m_context must be a vk::raii::Context
+    return vk::raii::Instance(m_context, createInfo);
 }
 
-void Renderer::create_surface(struct wl_display* display, struct wl_surface* surface) {
-    vk::WaylandSurfaceCreateInfoKHR info({}, display, surface);
-    m_surface.emplace(*m_instance, info);
+vk::raii::SurfaceKHR Renderer::create_surface(wl_display* display, wl_surface* surface) {
+    vk::WaylandSurfaceCreateInfoKHR createInfo{
+        .flags = {},        // Reserved for future use
+        .display = display, // Your wl_display*
+        .surface = surface  // Your wl_surface*
+    };
+    // 2. Use the RAII Instance (assumed member 'instance') to create the surface
+    // The raii::SurfaceKHR constructor automatically manages the handle's lifetime
+    return vk::raii::SurfaceKHR(m_instance, createInfo); 
 }
 
-void Renderer::create_device() {
-    // 1. Pick Physical Device
-    auto phys_devices = m_instance->enumeratePhysicalDevices();
+vk::raii::PhysicalDevice Renderer::create_physical_device(){
+    // 1. Enumerate all available physical devices
+    // Returns a vk::raii::PhysicalDevices (which acts like a std::vector<vk::raii::PhysicalDevice>)
+    vk::raii::PhysicalDevices physicalDevices(m_instance);
+
+    if (physicalDevices.empty()) {
+        throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+    }
+
+    // 2. Select a suitable device
+    // You can loop through them to check properties/features
+    for (const auto& device : physicalDevices) {
+        auto properties = device.getProperties();
+        
+        // Example: Prefer a discrete GPU
+        if (properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+            return device; 
+        }
+    }
+
+    // Default to the first available device if no discrete GPU is found
+    return physicalDevices[0];
+};
+
+uint32_t Renderer::find_queue_family() {
+    // 1. Get queue family properties from the physical device
+    auto queueFamilies = m_physicalDevice.getQueueFamilyProperties();
+
+    for (uint32_t i = 0; i < queueFamilies.size(); ++i) {
+        // 2. Check for Graphics support
+        bool supportsGraphics = !!(queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics);
+
+        // 3. Check for Surface/Presentation support (Wayland)
+        // m_surface is the vk::raii::SurfaceKHR you created earlier
+        bool supportsPresent = m_physicalDevice.getSurfaceSupportKHR(i, *m_surface);
+
+        if (supportsGraphics && supportsPresent) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("Failed to find a suitable queue family!");
+}
+
+vk::raii::Device Renderer::create_logical_device(){
+    // 1. Specify the queue(s) to be created. 
+    // Usually, you'd use a member 'queueFamilyIndex' found during PhysicalDevice selection.
+    m_queueFamilyIndex = find_queue_family();
+
+    float queuePriority = 1.0f;
+    vk::DeviceQueueCreateInfo queueCreateInfo{
+        .queueFamilyIndex = m_queueFamilyIndex,
+        .queueCount = 1,
+        .pQueuePriorities = &queuePriority
+    };
+
+    // 2. Define required device-level extensions
+    std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME // Required for presenting images to a surface
+    };
+
+    // 3. Set up the logical device creation info
+    vk::DeviceCreateInfo createInfo{
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queueCreateInfo,
+        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
+        .ppEnabledExtensionNames = deviceExtensions.data()
+    };
+
+    // 4. Instantiate the RAII Device
+    // This requires the physical device and the create info.
+    return vk::raii::Device(m_physicalDevice, createInfo);
+};
+
+vk::raii::Queue Renderer::create_graphics_queue() {
+    // getQueue(uint32_t queueFamilyIndex, uint32_t queueIndex)
+    // Returns a vk::raii::Queue object
+    return vk::raii::Queue(m_device, m_queueFamilyIndex, 0);
+}
+
+vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t height) {
+    // 1. Query basic surface capabilities
+    auto capabilities = m_physicalDevice.getSurfaceCapabilitiesKHR(*m_surface);
+    auto formats = m_physicalDevice.getSurfaceFormatsKHR(*m_surface);
     
-    // Basic scoring to pick Discrete GPU (NVIDIA)
-    for (auto& p : phys_devices) {
-        if (p.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
-            m_physical_device.emplace(p);
+    // 2. Select format (usually B8G8R8A8_SRGB is a safe bet)
+    vk::SurfaceFormatKHR surfaceFormat = formats[0]; 
+    for (const auto& f : formats) {
+        if (f.format == vk::Format::eB8G8R8A8Srgb && f.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+            surfaceFormat = f;
             break;
         }
     }
-    
-    // Fallback if no dGPU found
-    if (!m_physical_device) m_physical_device.emplace(phys_devices.front());
 
-    // 2. Create Logical Device
-    // Find a graphics queue family
-    auto families = m_physical_device->getQueueFamilyProperties();
-    uint32_t graphicsIndex = 0;
-    for (uint32_t i = 0; i < families.size(); ++i) {
-        if (families[i].queueFlags & vk::QueueFlagBits::eGraphics) {
-            graphicsIndex = i;
-            break;
-        }
+    // 3. Configure the swapchain extent (clamped to surface limits)
+    vk::Extent2D extent{
+        std::clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+        std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+    };
+
+    // 4. Set image count (usually triple buffering)
+    uint32_t imageCount = capabilities.minImageCount + 1;
+    if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
+        imageCount = capabilities.maxImageCount;
     }
 
-    float priority = 1.0f;
-    vk::DeviceQueueCreateInfo queue_info({}, graphicsIndex, 1, &priority);
-    std::vector<const char*> device_extensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    
-    vk::DeviceCreateInfo device_info({}, queue_info, {}, device_extensions);
-    m_device.emplace(*m_physical_device, device_info);
-}
+    // 5. Build the Swapchain info
+    vk::SwapchainCreateInfoKHR createInfo{
+        .surface = *m_surface,
+        .minImageCount = imageCount,
+        .imageFormat = surfaceFormat.format,
+        .imageColorSpace = surfaceFormat.colorSpace,
+        .imageExtent = extent,
+        .imageArrayLayers = 1,
+        .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+        .imageSharingMode = vk::SharingMode::eExclusive, // Assuming graphics and present queue are the same
+        .preTransform = capabilities.currentTransform,
+        .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
+        .presentMode = vk::PresentModeKHR::eFifo, // Guaranteed to be supported
+        .clipped = VK_TRUE,
+        .oldSwapchain = nullptr
+    };
 
-void Renderer::create_graphics_queue() {
-    m_graphics_queue.emplace(*m_device, m_queue_family_index, 0);
-}
-
-void Renderer::create_swapchain(uint32_t width, uint32_t height) {
-    vk::SwapchainCreateInfoKHR info;
-    info.setSurface(**m_surface);
-    info.setMinImageCount(3);
-    info.setImageFormat(vk::Format::eB8G8R8A8Unorm);
-    info.setImageExtent({width, height});
-    info.setImageArrayLayers(1);
-    info.setImageUsage(vk::ImageUsageFlagBits::eColorAttachment);
-    info.setPresentMode(vk::PresentModeKHR::eMailbox);
-    info.setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque);
-
-    // 1. Create the RAII swapchain
-    m_swapchain.emplace(*m_device, info);
-    m_swapchain_images = m_swapchain->getImages();
-    uint32_t image_count = static_cast<uint32_t>(m_swapchain_images.size());
-
-    // Recreate semaphores to match the actual number of images
-    m_image_available_sems.clear();
-    m_render_finished_sems.clear();
-    
-    vk::SemaphoreCreateInfo sem_info;
-    for (uint32_t i = 0; i < image_count; ++i) {
-        m_image_available_sems.emplace_back(*m_device, sem_info);
-        m_render_finished_sems.emplace_back(*m_device, sem_info);
-    }
-    
-    m_images_in_flight.assign(image_count, nullptr);
+    return vk::raii::SwapchainKHR(m_device, createInfo);
 }
 
 void Renderer::create_sync_objects() {
-    vk::SemaphoreCreateInfo sem_info;
-    vk::FenceCreateInfo fence_info(vk::FenceCreateFlagBits::eSignaled);
+    // 1. Prepare creation info for Binary Semaphores
+    vk::SemaphoreCreateInfo binaryInfo{};
+
+    // 2. Prepare creation info for Timeline Semaphore
+    vk::SemaphoreTypeCreateInfo timelineTypeInfo{
+        .semaphoreType = vk::SemaphoreType::eTimeline,
+        .initialValue = 0
+    };
+    vk::SemaphoreCreateInfo timelineInfo{
+        .pNext = &timelineTypeInfo
+    };
+
+    // 3. Populate vectors with RAII objects
+    m_imageAvailableSemaphores.reserve(MAX_FRAMES_IN_FLIGHT);
+    m_renderFinishedSemaphores.reserve(MAX_FRAMES_IN_FLIGHT);
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        // Use *m_device to pass the vk::raii::Device reference
-        m_image_available_sems.emplace_back(*m_device, sem_info);
-        m_render_finished_sems.emplace_back(*m_device, sem_info);
-        m_in_flight_fences.emplace_back(*m_device, fence_info);
+        m_imageAvailableSemaphores.emplace_back(m_device, binaryInfo);
+        m_renderFinishedSemaphores.emplace_back(m_device, binaryInfo);
     }
+
+    // 4. Create the single timeline semaphore
+    m_frameTimeline = vk::raii::Semaphore(m_device, timelineInfo);
 }
 
 
-void Renderer::create_command_resources() {
-    vk::CommandPoolCreateInfo pool_info(
-        vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 
-        m_queue_family_index
-    );
-    m_command_pool.emplace(*m_device, pool_info);
+vk::raii::CommandPool Renderer::create_command_pool() {
+    // 1. Create the Command Pool
+    vk::CommandPoolCreateInfo poolInfo{
+        .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+        .queueFamilyIndex = m_queueFamilyIndex
+    };
+    return vk::raii::CommandPool(m_device, poolInfo);
+}
 
-    vk::CommandBufferAllocateInfo alloc_info(
-        **m_command_pool, 
-        vk::CommandBufferLevel::ePrimary, 
-        static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
-    );
-    // RAII CommandBuffers returns a vector, so we can assign directly
-    m_command_buffers = m_device->allocateCommandBuffers(alloc_info);
+vk::raii::CommandBuffers Renderer::create_command_buffers() {
+    // 2. Allocate Command Buffers
+    vk::CommandBufferAllocateInfo allocInfo{
+        .commandPool = *m_commandPool,
+        .level = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
+    };
 
-    // In Renderer.cpp / create_command_resources()
-vk::BufferCreateInfo bufferInfo({}, 64, vk::BufferUsageFlagBits::eTransferDst);
-m_dummy_buffer.emplace(*m_device, bufferInfo);
-
-auto memReqs = m_dummy_buffer->getMemoryRequirements();
-vk::MemoryAllocateInfo allocInfo(memReqs.size, findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
-m_dummy_memory.emplace(*m_device, allocInfo);
-
-m_dummy_buffer->bindMemory(*m_dummy_memory, 0);
+    // This returns a vk::raii::CommandBuffers object
+    // which contains the vector of individual command buffers
+    return vk::raii::CommandBuffers(m_device, allocInfo);
 }
 
 void Renderer::draw_frame() {
-    // 1. Wait for the CPU-GPU sync fence for this 'slot' (0 or 1)
-    if (m_device->waitForFences({*m_in_flight_fences[m_current_frame]}, true, UINT64_MAX) != vk::Result::eSuccess) return;
-
-    // 2. Acquire Next Image
-    uint32_t image_index;
-    try {
-        // Use the semaphore associated with the IMAGE slot
-        // Note: You might need a temporary semaphore if you don't know the index yet,
-        // but typically we use m_image_available_sems[m_current_frame] and then 
-        // swap, but for your errors, indexing by image_index is the "Vulkan Guide" fix.
-        
-        // BETTER: Use a pool of semaphores for acquisition, but for now:
-        auto result = m_swapchain->acquireNextImage(UINT64_MAX, *m_image_available_sems[m_current_frame]);
-        image_index = result.value;
-    } catch (const vk::OutOfDateKHRError&) { return; }
-
-    // 3. Fence Tracking (Prevent colliding with a frame still rendering this image)
-    if (m_images_in_flight[image_index]) {
-        (void)m_device->waitForFences({m_images_in_flight[image_index]}, true, UINT64_MAX);
+    // 1. CPU-SIDE SYNCHRONIZATION
+    // Wait for the GPU to finish the work of (Current - MAX_FRAMES_IN_FLIGHT)
+    if (m_currentFrameCounter >= MAX_FRAMES_IN_FLIGHT) {
+        uint64_t waitValue = m_currentFrameCounter - MAX_FRAMES_IN_FLIGHT + 1;
+        vk::SemaphoreWaitInfo waitInfo{
+            .semaphoreCount = 1,
+            .pSemaphores = &(*m_frameTimeline),
+            .pValues = &waitValue
+        };
+        // Wait indefinitely for the GPU to catch up
+        auto waitResult = m_device.waitSemaphores(waitInfo, UINT64_MAX);
     }
-    m_images_in_flight[image_index] = *m_in_flight_fences[m_current_frame];
 
-    m_device->resetFences({*m_in_flight_fences[m_current_frame]});
-    // 5. Record Commands
-    auto& cmd = m_command_buffers[m_current_frame];
+    // 2. ACQUIRE IMAGE FROM SWAPCHAIN
+    uint32_t syncIndex = m_currentFrameCounter % MAX_FRAMES_IN_FLIGHT;
+    
+    // acquireNextImage returns a vk::ResultValue tuple
+    auto [result, imageIndex] = m_swapchain.acquireNextImage(
+        UINT64_MAX, 
+        *m_imageAvailableSemaphores[syncIndex]
+    );
+
+    // 3. COMMAND RECORDING
+    auto& cmd = m_commandBuffers[syncIndex];
+    vk::Image image = m_swapchainImages[imageIndex];
+
     cmd.reset();
-    cmd.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+    cmd.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
+    // Transition: Undefined -> Transfer Destination
+    vk::ImageMemoryBarrier2 barrier_to_clear{
+        .dstStageMask = vk::PipelineStageFlagBits2::eClear,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .image = image,
+        .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+    };
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_clear });
 
-    cmd.fillBuffer(**m_dummy_buffer, 0, 64, 0);
+    // CLEAR TO ORANGE
+    vk::ClearColorValue orange_color(std::array<float, 4>{1.0f, 0.5f, 0.0f, 1.0f});
+    vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    cmd.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, orange_color, range);
 
-    // Barrier to ensure the fill is recognized before presentation
-    vk::BufferMemoryBarrier releaseBarrier(
-        vk::AccessFlagBits::eTransferWrite,
-        vk::AccessFlagBits::eMemoryRead,
-        VK_QUEUE_FAMILY_IGNORED,
-        VK_QUEUE_FAMILY_IGNORED,
-        **m_dummy_buffer,
-        0, 64
-    );
-
-    cmd.pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer,
-        vk::PipelineStageFlagBits::eBottomOfPipe,
-        {}, nullptr, releaseBarrier, nullptr
-    );
-
-    // FIX: Mandatory Layout Transition (Even if drawing nothing)
-    // If you use a RenderPass, the 'initialLayout' and 'finalLayout' do this for you.
-    // If NOT using a RenderPass, you MUST use a Pipeline Barrier:
-    vk::ImageMemoryBarrier barrier;
-    barrier.oldLayout = vk::ImageLayout::eUndefined;
-    barrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = m_swapchain_images[image_index]; // You need to store these in recreate_swapchain
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-    barrier.srcAccessMask = {};
-    barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
-
-    cmd.pipelineBarrier(
-        vk::PipelineStageFlagBits::eTopOfPipe,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput,
-        {}, nullptr, nullptr, barrier
-    );
+    // Transition: Transfer Destination -> Present
+    vk::ImageMemoryBarrier2 barrier_to_present{
+        .srcStageMask = vk::PipelineStageFlagBits2::eClear,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands, // Required for present safety
+        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::ePresentSrcKHR,
+        .image = image,
+        .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
+    };
+    cmd.pipelineBarrier2(vk::DependencyInfo{ .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier_to_present });
 
     cmd.end();
 
-    // 4. Submit
-    vk::PipelineStageFlags wait_stages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
-    
-    vk::SubmitInfo submit_info(
-        *m_image_available_sems[m_current_frame], // Wait for acquisition
-        wait_stages, 
-        *m_command_buffers[m_current_frame], 
-        *m_render_finished_sems[image_index]     // Signal for this SPECIFIC image
-    );
-    
-    m_graphics_queue->submit(submit_info, *m_in_flight_fences[m_current_frame]);
+    // 4. SUBMIT TO QUEUE
+    m_currentFrameCounter++; // Increment: this frame is now assigned this new value
 
-    // 5. Present
-    vk::PresentInfoKHR present_info(
-        *m_render_finished_sems[image_index],    // Wait for the specific image to finish
-        **m_swapchain, 
-        image_index
-    );
-    
-    (void)m_graphics_queue->presentKHR(present_info);
+    vk::SemaphoreSubmitInfo waitSemaphoreInfo{
+        .semaphore = *m_imageAvailableSemaphores[syncIndex],
+        .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput
+    };
 
-    wl_display_flush(m_display); 
+    // Signal two things: The binary semaphore for present, and the timeline for CPU sync
+    std::array<vk::SemaphoreSubmitInfo, 2> signalSemaphoreInfos = {{
+        {
+            .semaphore = *m_renderFinishedSemaphores[syncIndex],
+            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput
+        },
+        {
+            .semaphore = *m_frameTimeline,
+            .value = m_currentFrameCounter, 
+            .stageMask = vk::PipelineStageFlagBits2::eAllCommands
+        }
+    }};
 
-    m_current_frame = (m_current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    vk::CommandBufferSubmitInfo cmdBufferInfo{ .commandBuffer = *cmd };
+
+    vk::SubmitInfo2 submitInfo{
+        .waitSemaphoreInfoCount = 1,
+        .pWaitSemaphoreInfos = &waitSemaphoreInfo,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &cmdBufferInfo,
+        .signalSemaphoreInfoCount = static_cast<uint32_t>(signalSemaphoreInfos.size()),
+        .pSignalSemaphoreInfos = signalSemaphoreInfos.data()
+    };
+
+    m_graphicsQueue.submit2(submitInfo);
+
+    // 5. PRESENTATION
+    vk::PresentInfoKHR presentInfo{
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &(*m_renderFinishedSemaphores[syncIndex]),
+        .swapchainCount = 1,
+        .pSwapchains = &(*m_swapchain),
+        .pImageIndices = &imageIndex
+    };
+
+    // presentKHR returns a vk::Result
+    auto presentResult = m_graphicsQueue.presentKHR(presentInfo);
 }
 
 
 void Renderer::recreate_swapchain(uint32_t width, uint32_t height) {
-    if (width == 0 || height == 0) return; // Prevent 0-extent error
-    m_device->waitIdle();
-
-    vk::SwapchainCreateInfoKHR info;
-    info.setSurface(**m_surface);
-    info.setMinImageCount(3); // Triple buffering for 1600p
-    info.setImageFormat(vk::Format::eB8G8R8A8Unorm);
-    info.setImageExtent({width, height});
-    info.setImageArrayLayers(1);
-    info.setImageUsage(vk::ImageUsageFlagBits::eColorAttachment);
-    info.setPresentMode(vk::PresentModeKHR::eMailbox);
-    info.setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque);
-
-    // Pass the old handle if it exists
-    if (m_swapchain.has_value()) {
-        info.setOldSwapchain(**m_swapchain);
-    }
-
-    // emplace destroys the old swapchain and moves the new one in
-    m_swapchain = vk::raii::SwapchainKHR(*m_device, info);
-
-    m_swapchain_images = m_swapchain->getImages();
-
-
-    // Recreate semaphores to match the actual number of images
-    m_image_available_sems.clear();
-    m_render_finished_sems.clear();
-    
-    vk::SemaphoreCreateInfo sem_info;
-    for (uint32_t i = 0; i < m_swapchain_images.size(); ++i) {
-        m_image_available_sems.emplace_back(*m_device, sem_info);
-        m_render_finished_sems.emplace_back(*m_device, sem_info);
-    }
-
-    // 3. Reset the image-to-fence tracking vector
-    // This must match the number of images in the new swapchain
-    m_images_in_flight.assign(m_swapchain_images.size(), nullptr);
 }
 
-
-
-uint32_t Renderer::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
-    auto memProperties = m_physical_device->getMemoryProperties();
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-    throw std::runtime_error("failed to find suitable memory type!");
-}
 
 } // namespace Zeta

@@ -21,10 +21,10 @@ namespace Zeta {
 
 class Window {
 public:
-    Window();
+    Window(int width, int height, const std::string& title);
     ~Window();
 
-    void init(int width, int height, const std::string& title);
+    void init();
 
     // Getters for the Vulkan Renderer
     wl_display* get_display() const { return m_display; }
