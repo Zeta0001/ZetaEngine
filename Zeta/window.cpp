@@ -19,6 +19,39 @@ static const struct wl_keyboard_listener keyboard_listener = {
     .modifiers = [](auto...){}, .repeat_info = [](auto...){}
 };
 
+static void output_handle_mode(void* data, struct wl_output*, uint32_t flags, int32_t w, int32_t h, int32_t) {
+    if (flags & WL_OUTPUT_MODE_CURRENT) {
+        auto* window = static_cast<Zeta::Window*>(data);
+        window->m_width = static_cast<uint32_t>(w);
+        window->m_width = static_cast<uint32_t>(h);
+        std::println("output dimensions: {}, {}",  window->m_width, window->m_width);
+    }
+}
+
+static const struct wl_output_listener output_listener = {
+    .geometry = [](void*, struct wl_output*, int32_t, int32_t, int32_t, int32_t, int32_t, const char*, const char*, int32_t) {},
+    .mode = output_handle_mode,
+    .done = [](void*, struct wl_output*) {},
+    .scale = [](void*, struct wl_output*, int32_t) {}
+};
+
+void Zeta::Window::setOpaqueRegion(uint32_t width, uint32_t height) {
+    // 1. Create a region object through the compositor interface
+    struct wl_region* region = wl_compositor_create_region(m_compositor);
+    
+    // 2. Add the rectangle covering the entire window area
+    wl_region_add(region, 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height));
+    
+    // 3. Apply the region to your surface
+    wl_surface_set_opaque_region(m_surface, region);
+    
+    // 4. Critical: In Wayland, you MUST commit the surface for changes to take effect
+    wl_surface_commit(m_surface);
+    
+    // 5. You can destroy the region handle immediately; the compositor keeps its own copy
+    wl_region_destroy(region);
+}
+
 Window::Window(uint32_t width, uint32_t height) : m_width(width), m_height(height) {
     m_display = wl_display_connect(nullptr);
     if (!m_display) throw std::runtime_error("Failed to connect to Wayland display");
@@ -28,6 +61,7 @@ Window::Window(uint32_t width, uint32_t height) : m_width(width), m_height(heigh
     
     // Sync to bind globals (compositor, shell, seat)
     wl_display_roundtrip(m_display);
+
 
     if (!m_compositor || !m_xdg_wm_base) throw std::runtime_error("Wayland: Missing required protocols");
 
@@ -41,6 +75,11 @@ Window::Window(uint32_t width, uint32_t height) : m_width(width), m_height(heigh
 
     wl_surface_commit(m_surface);
     wl_display_roundtrip(m_display);
+
+    if (m_surface && m_width > 0) {
+        std::println("setphyswidth@@@@@@@@@@@@");
+        setOpaqueRegion(m_width, m_height);
+    }
 }
 
 Window::~Window() {
@@ -84,6 +123,9 @@ void Window::handle_registry_global(void* data, struct wl_registry* reg, uint32_
     } else if (strcmp(intf, "wl_seat") == 0) {
         self->m_seat = (wl_seat*)wl_registry_bind(reg, id, &wl_seat_interface, 7);
         wl_seat_add_listener(self->m_seat, &seat_listener, self);
+    } else if (strcmp(intf, "wl_output") == 0) {
+        self->m_output = (struct wl_output*)wl_registry_bind(reg, id, &wl_output_interface, 2);
+        wl_output_add_listener(self->m_output, &output_listener, self);
     }
 }
 

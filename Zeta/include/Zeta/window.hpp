@@ -32,6 +32,9 @@ public:
     uint32_t m_width = 600;
     uint32_t m_height = 600;
 
+
+    uint32_t m_physicalWidth = 0;
+    uint32_t m_physicalHeight = 0;
     void poll_events();
 
     void update(Zeta::Event e);
@@ -40,6 +43,7 @@ public:
     void set_resize_callback(ResizeCallback cb) { m_onResize = std::move(cb); }
     void set_key_callback(KeyCallback cb) { m_onKey = std::move(cb); }
 
+    void setOpaqueRegion(uint32_t width, uint32_t height);
     // Getters for Vulkan Surface creation
     struct wl_display* get_display() const { return m_display; }
     struct wl_surface* get_surface() const { return m_surface; }
@@ -60,7 +64,8 @@ private:
     struct wl_surface*   m_surface = nullptr;
     struct wl_seat*       m_seat = nullptr;
     struct wl_keyboard*   m_keyboard = nullptr;
-    
+    struct wl_output* m_output = nullptr;
+
     // XDG Shell State
     struct xdg_wm_base*  m_xdg_wm_base = nullptr;
     struct xdg_surface*  m_xdg_surface = nullptr;

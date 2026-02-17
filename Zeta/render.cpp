@@ -258,9 +258,9 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
         std::clamp(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
     };
     std::println("extent: {}, {}", extent.width, extent.height);
-    extent = capabilities.currentExtent;
-    std::println("extent: {}, {}", extent.width, extent.height);
-    
+   // extent = capabilities.currentExtent;
+   // std::println("extent: {}, {}", width, height);
+
     // 4. Set image count (usually triple buffering)
     uint32_t imageCount = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
