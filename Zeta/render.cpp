@@ -282,7 +282,7 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
         .imageSharingMode = vk::SharingMode::eExclusive, // Assuming graphics and present queue are the same
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
-        .presentMode = vk::PresentModeKHR::eFifo, // Guaranteed to be supported
+        .presentMode = vk::PresentModeKHR::eMailbox, // Guaranteed to be supported
         .clipped = VK_TRUE,
         .oldSwapchain = oldHandle
     };

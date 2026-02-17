@@ -23,8 +23,8 @@ static void output_handle_mode(void* data, struct wl_output*, uint32_t flags, in
     if (flags & WL_OUTPUT_MODE_CURRENT) {
         auto* window = static_cast<Zeta::Window*>(data);
         window->m_width = static_cast<uint32_t>(w);
-        window->m_width = static_cast<uint32_t>(h);
-        std::println("output dimensions: {}, {}",  window->m_width, window->m_width);
+        window->m_height = static_cast<uint32_t>(h);
+        std::println("output dimensions: {}, {}",  window->m_width, window->m_height);
     }
 }
 
@@ -72,14 +72,17 @@ Window::Window(uint32_t width, uint32_t height) : m_width(width), m_height(heigh
     m_xdg_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
     xdg_toplevel_add_listener(m_xdg_toplevel, &toplevel_listener, this);
     xdg_toplevel_set_title(m_xdg_toplevel, "Zeta Engine");
+    xdg_toplevel_set_fullscreen(m_xdg_toplevel, nullptr); 
 
-    wl_surface_commit(m_surface);
-    wl_display_roundtrip(m_display);
+   // wl_surface_commit(m_surface);
+    //wl_display_roundtrip(m_display);
 
     if (m_surface && m_width > 0) {
         std::println("setphyswidth@@@@@@@@@@@@");
         setOpaqueRegion(m_width, m_height);
     }
+
+    wl_display_roundtrip(m_display);
 }
 
 Window::~Window() {
