@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "Zeta/events.hpp"
 
 struct wl_display;
 struct wl_surface;
@@ -32,6 +33,8 @@ public:
     uint32_t m_height = 600;
 
     void poll_events();
+
+    void update(Zeta::Event e);
     
     // Setters for App-level callbacks
     void set_resize_callback(ResizeCallback cb) { m_onResize = std::move(cb); }

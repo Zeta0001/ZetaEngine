@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include "xdg-shell-client-protocol.h"
 
+#include <linux/input-event-codes.h>
+#include <print>
 namespace Zeta {
 
 // Listener Definitions
@@ -54,7 +56,21 @@ Window::~Window() {
 }
 
 void Window::poll_events() {
+    // 1. Send any outgoing requests (like acks or pongs) to the compositor
+    if (wl_display_prepare_read(m_display) == 0) {
+        // 2. Read new events from the socket into the buffer
+        wl_display_read_events(m_display);
+    } else {
+        // If someone else already prepared a read, just dispatch what we have
+        wl_display_dispatch_pending(m_display);
+        return;
+    }
+
+    // 3. Process everything now in the buffer (triggers your callbacks)
     wl_display_dispatch_pending(m_display);
+    
+    // 4. Ensure the display is flushed so the compositor sees our responses
+    wl_display_flush(m_display);
 }
 
 // Static Handlers
@@ -96,5 +112,17 @@ void Window::handle_xdg_toplevel_configure(void* data, struct xdg_toplevel*, int
 void Window::handle_xdg_wm_base_ping(void*, struct xdg_wm_base* wm, uint32_t serial) {
     xdg_wm_base_pong(wm, serial);
 }
+
+
+
+void Window::update(Zeta::Event e) {
+
+    auto arg = std::get<Zeta::KeyEvent>(e);
+
+    if (arg.key == KEY_A && arg.pressed) { std::println("pressed {}", arg.key ); }
+    else if (arg.key == KEY_B && arg.pressed) { std::println("pressed {}", arg.key ); }
+    else if (arg.key == KEY_C && arg.pressed) { std::println("pressed {}", arg.key ); }
+    else if (arg.key == KEY_D && arg.pressed) { std::println("pressed {}", arg.key ); }
+};
 
 } // namespace Zeta

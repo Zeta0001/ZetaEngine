@@ -4,7 +4,8 @@
 #include "app.hpp"
 #include <vulkan/vulkan_raii.hpp>
 
-App::App() : m_window(2560, 1600), m_renderer(){};
+
+App::App() : m_window(800, 600), m_renderer(){};
 
 void App::init() {
     std::println("init app!");
@@ -29,15 +30,15 @@ void App::run() {
             std::visit([this](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, Zeta::QuitEvent>) {
+					
                     m_running = false;
                 } else if constexpr (std::is_same_v<T, Zeta::ResizeEvent>) {
                     m_renderer.handle_resize(arg.width, arg.height);
 					//m_window.acknowledge_resize();
                 }
 				else if constexpr (std::is_same_v<T, Zeta::KeyEvent>) {
-					if (arg.key == 1 && arg.pressed) { // 1 is often the 'Esc' key code
-						m_running = false;
-					}
+					m_window.update(arg);
+					if (arg.key == 1 && arg.pressed) { m_running = false; } 
 				}
             }, e);
         }

@@ -41,7 +41,7 @@ class InputHandler {
     public:
         InputHandler(EventBus& bus) : m_bus(bus) {}
         
-        void on_key_callback(int key) {
+        void on_key_callback(uint32_t key) {
             m_bus.push(KeyEvent{key, true});
         }
     private:
