@@ -4,6 +4,7 @@
 #include "app.hpp"
 #include <vulkan/vulkan_raii.hpp>
 
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 
 App::App() : m_window(800, 600), m_renderer(){};
 
@@ -26,21 +27,14 @@ void App::run() {
 		//std::this_thread::sleep_for(std::chrono::milliseconds(16));
 		m_window.poll_events();
 		Zeta::Event e;
-        while (m_eventBus.poll(e)) {
-            std::visit([this](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, Zeta::QuitEvent>) {
-					
-                    m_running = false;
-                } else if constexpr (std::is_same_v<T, Zeta::ResizeEvent>) {
-                    m_renderer.handle_resize(arg.width, arg.height);
-					//m_window.acknowledge_resize();
+        while (auto e = m_eventBus.poll()) {
+            std::visit(overloaded {
+                [this](const QuitEvent&) { m_running = false; },
+                [this](const ResizeEvent& ev) { m_renderer.handle_resize(ev.w, ev.h); },
+                [this](const KeyEvent& ev) { 
+                    if (ev.key == KEY_ESC) m_running = false; 
                 }
-				else if constexpr (std::is_same_v<T, Zeta::KeyEvent>) {
-					m_window.update(arg);
-					if (arg.key == 1 && arg.pressed) { m_running = false; } 
-				}
-            }, e);
+            }, *e);
         }
         // 2. Handle Resizing Handshake
 		// if (m_window.m_resize_pending) {

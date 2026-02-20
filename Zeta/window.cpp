@@ -147,6 +147,8 @@ void Window::handle_keyboard_key(void* data, struct wl_keyboard*, uint32_t, uint
 
 void Window::handle_xdg_surface_configure(void* data, struct xdg_surface* surf, uint32_t serial) {
     xdg_surface_ack_configure(surf, serial);
+    auto* window = static_cast<Zeta::Window*>(data);
+    wl_surface_commit(window->m_surface);
 }
 
 void Window::handle_xdg_toplevel_configure(void* data, struct xdg_toplevel*, int32_t w, int32_t h, struct wl_array*) {

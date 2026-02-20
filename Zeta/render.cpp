@@ -246,7 +246,7 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
     // 2. Select format (usually B8G8R8A8_SRGB is a safe bet)
     vk::SurfaceFormatKHR surfaceFormat = formats[0]; 
     for (const auto& f : formats) {
-        if (f.format == vk::Format::eB8G8R8A8Srgb && f.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+        if (f.format == vk::Format::eA2B10G10R10UnormPack32  && f.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) { //vk::Format::eB8G8R8A8Srgb
             surfaceFormat = f;
             break;
         }
@@ -269,12 +269,18 @@ vk::raii::SwapchainKHR Renderer::create_swapchain(uint32_t width, uint32_t heigh
 
     m_swapchainFormat = surfaceFormat.format; 
     m_swapchainExtent = extent;
+
+    if (surfaceFormat.format == vk::Format::eA2B10G10R10UnormPack32) {
+        std::println("format correct");
+    } else {
+        std::println("format wrong");
+    }
     static int count = 0;
     // 5. Build the Swapchain info
     vk::SwapchainCreateInfoKHR createInfo{
         .surface = *m_surface,
         .minImageCount = imageCount,
-        .imageFormat = surfaceFormat.format,
+        .imageFormat = vk::Format::eA2B10G10R10UnormPack32, //surfaceFormat.format,
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,

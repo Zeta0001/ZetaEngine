@@ -7,44 +7,44 @@
 namespace Zeta {
 
 struct QuitEvent {};
-struct ResizeEvent { uint32_t width, height; };
+struct ResizeEvent { uint32_t w, h; };
 struct KeyEvent { uint32_t key; bool pressed; };
 
-using Event = std::variant<QuitEvent, ResizeEvent, KeyEvent>;
+// The "Base" variant that Zeta knows how to process
+using CoreEvent = std::variant<QuitEvent, ResizeEvent, KeyEvent>;
 
 
-
+template<typename EventVariant>
 class EventBus {
 public:
-    // Push can be called by any thread (Input, Network, etc.)
-    void push(Event e) {
+    void push(EventVariant e) {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_queue.push(e);
+        m_queue.push(std::move(e));
     }
 
-    // Processed usually by the Main Thread
-    bool poll(Event& out_event) {
+    std::optional<EventVariant> poll() {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_queue.empty()) return false;
+        if (m_queue.empty()) return std::nullopt;
         
-        out_event = m_queue.front();
+        EventVariant e = std::move(m_queue.front());
         m_queue.pop();
-        return true;
+        return e;
     }
 
 private:
-    std::queue<Event> m_queue;
+    std::queue<EventVariant> m_queue;
     std::mutex m_mutex;
 };
 
+
+template<typename T>
 class InputHandler {
-    public:
-        InputHandler(EventBus& bus) : m_bus(bus) {}
-        
-        void on_key_callback(uint32_t key) {
-            m_bus.push(KeyEvent{key, true});
-        }
-    private:
-        EventBus& m_bus;
-    };
+public:
+    InputHandler(EventBus<T>& bus) : m_bus(bus) {}
+    void on_key_callback(uint32_t key, bool pressed) {
+        m_bus.push(KeyEvent{key, pressed});
+    }
+private:
+    EventBus<T>& m_bus;
+};
 }
